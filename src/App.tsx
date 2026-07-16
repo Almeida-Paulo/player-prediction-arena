@@ -294,125 +294,142 @@ export function App() {
 
       {loadError && <FeedNotice message={loadError} />}
 
-      <main className="home-grid">
-        <section className="market-board" aria-label="World Cup markets">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">Markets</p>
-              <h2>World Cup board</h2>
+      <main className="market-layout">
+        <section className="market-main" aria-label="World Cup markets">
+          <div className="fixture-strip">
+            <div className="fixture-strip-header">
+              <strong>World Cup</strong>
+              <span>{isLoading ? "Loading fixtures" : `${matches.length} fixtures`}</span>
             </div>
-            <span className="count-pill">{isLoading ? "Loading" : `${matches.length} fixtures`}</span>
-          </div>
-
-          <div className="match-list">
-            {matches.map((match) => (
-              <button
-                className={`match-row ${match.id === selectedMatch?.id ? "is-selected" : ""}`}
-                key={match.id}
-                type="button"
-                onClick={() => selectMatch(match.id)}
-              >
-                <TeamIdentity code={match.homeCode} logoUrl={match.homeLogoUrl} name={match.home} />
-                <div className="match-score">
-                  <strong>
-                    {match.score[match.home] ?? 0} - {match.score[match.away] ?? 0}
-                  </strong>
-                  <span>{match.status === "SCHEDULED" ? formatStart(match.startTime) : match.minute}</span>
-                </div>
-                <TeamIdentity alignRight code={match.awayCode} logoUrl={match.awayLogoUrl} name={match.away} />
-              </button>
-            ))}
-            {!matches.length && (
-              <div className="empty-state">
-                <ShieldCheck />
-                <strong>No real fixtures loaded</strong>
-                <p>Configure TXLine credentials on the server. The interface will not invent matches when the feed is unavailable.</p>
-              </div>
-            )}
-          </div>
-
-          {selectedMatch && (
-            <div className="prediction-list">
-              {markets.map((market) => (
+            <div className="fixture-tabs" aria-label="Fixtures">
+              {matches.map((match) => (
                 <button
-                  className={`prediction-row ${market.id === selectedMarket?.id ? "is-selected" : ""}`}
-                  key={market.id}
+                  className={`fixture-tab ${match.id === selectedMatch?.id ? "is-selected" : ""}`}
+                  key={match.id}
                   type="button"
-                  onClick={() => setState((current) => ({ ...current, selectedMarketId: market.id }))}
+                  onClick={() => selectMatch(match.id)}
                 >
-                  <div>
-                    <span>{market.kind}</span>
-                    <strong>{market.label}</strong>
-                  </div>
-                  <div className="price-pair">
-                    <span>Yes {formatProbability(market.oddsBps)}</span>
-                    <strong>{formatDecimal(market.oddsBps)}x</strong>
-                  </div>
+                  <span>{match.status}</span>
+                  <strong>
+                    {match.homeCode} {match.score[match.home] ?? 0} - {match.score[match.away] ?? 0} {match.awayCode}
+                  </strong>
+                  <small>{match.status === "SCHEDULED" ? formatStart(match.startTime) : match.minute}</small>
                 </button>
               ))}
             </div>
-          )}
-        </section>
+          </div>
 
-        <section className="match-center" aria-label="Match center">
-          {selectedMatch ? (
-            <>
-              <div className="match-hero">
+          {selectedMatch && selectedMarket ? (
+            <section className="market-detail-card">
+              <div className="market-detail-top">
                 <div>
-                  <p className="eyebrow">{selectedMatch.competition ?? "World Cup"}</p>
-                  <h2>
-                    {selectedMatch.home} vs {selectedMatch.away}
-                  </h2>
-                  <p className="muted">
-                    {selectedMatch.round ?? "Confirmed fixture"} - {selectedMatch.status} - {formatStart(selectedMatch.startTime)}
-                  </p>
+                  <div className="market-kicker">
+                    <span>{selectedMatch.competition ?? "World Cup"}</span>
+                    <span>{selectedMatch.status}</span>
+                    <span>{formatStart(selectedMatch.startTime)}</span>
+                  </div>
+                  <h2>{marketQuestion(selectedMarket, selectedMatch)}</h2>
+                  <div className="market-meta-row">
+                    <TeamIdentity code={selectedMatch.homeCode} logoUrl={selectedMatch.homeLogoUrl} name={selectedMatch.home} />
+                    <span className="match-versus">
+                      {selectedMatch.score[selectedMatch.home] ?? 0}:{selectedMatch.score[selectedMatch.away] ?? 0}
+                    </span>
+                    <TeamIdentity alignRight code={selectedMatch.awayCode} logoUrl={selectedMatch.awayLogoUrl} name={selectedMatch.away} />
+                  </div>
                 </div>
-                <div className="score-chip">
-                  <strong>
-                    {selectedMatch.score[selectedMatch.home] ?? 0}:{selectedMatch.score[selectedMatch.away] ?? 0}
-                  </strong>
-                  <span>{selectedMatch.minute}</span>
+                <div className="market-price-card">
+                  <span>Chance</span>
+                  <strong>{formatProbability(selectedMarket.oddsBps)}</strong>
+                  <small>{formatDecimal(selectedMarket.oddsBps)}x payout</small>
                 </div>
+              </div>
+
+              <div className="market-action-row">
+                <button className="yes-button" type="button" onClick={placePrediction}>
+                  Yes {formatProbability(selectedMarket.oddsBps)}
+                </button>
+                <button className="no-button" type="button">
+                  No {formatNoProbability(selectedMarket.oddsBps)}
+                </button>
               </div>
 
               <LineupPitch match={selectedMatch} />
 
-              <div className="stats-strip">
-                <StatComparison
-                  label="Possession"
-                  left={homeStats ? `${homeStats.possession}%` : "N/A"}
-                  right={awayStats ? `${awayStats.possession}%` : "N/A"}
-                />
-                <StatComparison
-                  label="Shots faced"
-                  left={homeStats ? String(homeStats.shotsAgainst) : "N/A"}
-                  right={awayStats ? String(awayStats.shotsAgainst) : "N/A"}
-                />
-                <StatComparison
-                  label="Corners faced"
-                  left={homeStats ? String(homeStats.cornersAgainst) : "N/A"}
-                  right={awayStats ? String(awayStats.cornersAgainst) : "N/A"}
-                />
-              </div>
-
-              <div className="event-panel">
-                <div className="section-heading compact">
-                  <h3>Timeline</h3>
-                  <span className="source-pill">{selectedMatch.source}</span>
+              <div className="market-lower-grid">
+                <div className="stats-strip">
+                  <StatComparison
+                    label="Possession"
+                    left={homeStats ? `${homeStats.possession}%` : "N/A"}
+                    right={awayStats ? `${awayStats.possession}%` : "N/A"}
+                  />
+                  <StatComparison
+                    label="Shots faced"
+                    left={homeStats ? String(homeStats.shotsAgainst) : "N/A"}
+                    right={awayStats ? String(awayStats.shotsAgainst) : "N/A"}
+                  />
+                  <StatComparison
+                    label="Corners faced"
+                    left={homeStats ? String(homeStats.cornersAgainst) : "N/A"}
+                    right={awayStats ? String(awayStats.cornersAgainst) : "N/A"}
+                  />
                 </div>
-                <EventList events={selectedMatch.events} />
+                <div className="event-panel">
+                  <div className="section-heading compact">
+                    <h3>Timeline</h3>
+                    <span className="source-pill">{selectedMatch.source}</span>
+                  </div>
+                  <EventList events={selectedMatch.events} />
+                </div>
               </div>
-            </>
+            </section>
           ) : (
             <div className="empty-state tall">
               <Clock3 />
               <strong>Waiting for TXLine fixtures</strong>
-              <p>Once the backend receives real World Cup data, the match center will populate automatically.</p>
+              <p>Once the backend receives real World Cup data, the market page will populate automatically.</p>
+            </div>
+          )}
+
+          {selectedMatch && (
+            <section className="markets-table-card">
+              <div className="section-heading">
+                <div>
+                  <h3>All markets</h3>
+                  <p className="muted">{selectedMatch.home} vs {selectedMatch.away}</p>
+                </div>
+                <span className="source-pill">TXLine</span>
+              </div>
+              <div className="market-table" role="list">
+                {markets.map((market) => (
+                  <button
+                    className={`market-table-row ${market.id === selectedMarket?.id ? "is-selected" : ""}`}
+                    key={market.id}
+                    type="button"
+                    onClick={() => setState((current) => ({ ...current, selectedMarketId: market.id }))}
+                  >
+                    <div>
+                      <span>{market.kind}</span>
+                      <strong>{marketQuestion(market, selectedMatch)}</strong>
+                    </div>
+                    <strong className="chance-cell">{formatProbability(market.oddsBps)}</strong>
+                    <span className="yes-cell">Yes {formatProbability(market.oddsBps)}</span>
+                    <span className="no-cell">No {formatNoProbability(market.oddsBps)}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {!matches.length && (
+            <div className="empty-state">
+              <ShieldCheck />
+              <strong>No real fixtures loaded</strong>
+              <p>Configure TXLine credentials on the server. The interface will not invent matches when the feed is unavailable.</p>
             </div>
           )}
         </section>
 
-        <aside className="trade-rail" aria-label="Trade ticket and wallet">
+        <aside className="trade-sidebar" aria-label="Trade ticket and wallet">
           <section className="trade-ticket">
             <div className="section-heading compact">
               <div>
@@ -824,6 +841,31 @@ function formatProbability(oddsBps: number): string {
   if (!oddsBps) return "--";
   const cents = Math.round((10000 / oddsBps) * 100);
   return `${Math.max(1, Math.min(99, cents))}c`;
+}
+
+function formatNoProbability(oddsBps: number): string {
+  if (!oddsBps) return "--";
+  const yes = Math.max(1, Math.min(99, Math.round((10000 / oddsBps) * 100)));
+  return `${Math.max(1, 100 - yes)}c`;
+}
+
+function marketQuestion(market: MarketDefinition, match: MatchSnapshot): string {
+  switch (market.id) {
+    case "home-win":
+      return `Will ${match.home} beat ${match.away}?`;
+    case "away-win":
+      return `Will ${match.away} beat ${match.home}?`;
+    case "home-goal":
+      return `Will ${match.home} score?`;
+    case "home-clean-sheet":
+      return `Will ${match.home} keep a clean sheet?`;
+    case "hat-trick-market":
+      return `Will any player score a hat-trick?`;
+    case "mom-home-team":
+      return `Will the match MVP come from ${match.home}?`;
+    default:
+      return market.label;
+  }
 }
 
 function formatStart(value?: string): string {
