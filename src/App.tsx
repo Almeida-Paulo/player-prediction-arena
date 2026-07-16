@@ -602,7 +602,7 @@ function LineupPitch({ match }: { match: MatchSnapshot }) {
         <span>Lineups</span>
         <TeamIdentity alignRight code={match.awayCode} logoUrl={match.awayLogoUrl} name={match.away} />
       </div>
-      <div className="pitch-surface">
+      <div className={`pitch-surface ${hasLineups ? "has-lineups" : "is-empty"}`}>
         {hasLineups ? (
           <>
             <LineupSide lineup={homeLineup} side="home" />
