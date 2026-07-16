@@ -45,10 +45,10 @@ async def catalog() -> dict[str, Any]:
         "badges": BADGES,
         "markets": MARKETS,
         "dataSources": [
-            {"id": "txline", "label": "TXLine", "role": "oracle obrigatorio"},
-            {"id": "openligadb", "label": "OpenLigaDB", "role": "fallback gratuito"},
-            {"id": "statsbomb", "label": "StatsBomb Open Data", "role": "historico aberto"},
-            {"id": "local-rating", "label": "Local Rating Engine", "role": "MOM sem API paga"},
+            {"id": "txline", "label": "TXLine", "role": "required World Cup oracle"},
+            {"id": "openligadb", "label": "OpenLigaDB", "role": "free fallback outside launch mode"},
+            {"id": "statsbomb", "label": "StatsBomb Open Data", "role": "open historical data"},
+            {"id": "local-rating", "label": "Local Rating Engine", "role": "MOM when no paid rating API is configured"},
         ],
     }
 
@@ -59,6 +59,11 @@ async def matches() -> list[dict[str, Any]]:
     txline = await fetch_txline_matches(settings)
     if txline:
         return txline
+    if not settings.allow_demo_data:
+        raise HTTPException(
+            status_code=503,
+            detail="real_match_feed_unavailable_configure_txline_credentials",
+        )
     openliga = await fetch_openligadb_matches(settings)
     if openliga:
         return openliga

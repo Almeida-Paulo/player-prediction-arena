@@ -1,6 +1,6 @@
 import { cards } from "../../shared/cards";
 import { skillBadges } from "../../shared/badges";
-import { demoMatches, markets } from "../../shared/demo-data";
+import { markets } from "../../shared/demo-data";
 import { settlePosition } from "../../shared/settlement";
 import type { CardDefinition, MatchSnapshot, PositionInput, SettledPosition } from "../../shared/types";
 
@@ -21,13 +21,9 @@ export async function getCatalog(): Promise<CatalogResponse> {
 }
 
 export async function getMatches(): Promise<MatchSnapshot[]> {
-  try {
-    const response = await fetch("/api/matches");
-    if (!response.ok) throw new Error(`Matches HTTP ${response.status}`);
-    return (await response.json()) as MatchSnapshot[];
-  } catch {
-    return demoMatches;
-  }
+  const response = await fetch("/api/matches");
+  if (!response.ok) throw new Error(`Matches HTTP ${response.status}`);
+  return (await response.json()) as MatchSnapshot[];
 }
 
 export async function settlePositionApi(position: PositionInput, match: MatchSnapshot): Promise<SettledPosition> {

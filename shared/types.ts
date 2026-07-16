@@ -65,12 +65,32 @@ export interface MatchEvent {
   tags: string[];
 }
 
+export interface LineupPlayer {
+  id?: string;
+  name: string;
+  number?: number;
+  position?: string;
+  x?: number;
+  y?: number;
+}
+
+export interface TeamLineup {
+  formation?: string;
+  starters: LineupPlayer[];
+  bench?: LineupPlayer[];
+}
+
 export interface MatchSnapshot {
   id: string;
   home: string;
   away: string;
   homeCode: string;
   awayCode: string;
+  homeLogoUrl?: string;
+  awayLogoUrl?: string;
+  competition?: string;
+  round?: string;
+  startTime?: string;
   minute: string;
   status: "SCHEDULED" | "LIVE" | "FINAL";
   score: Record<string, number>;
@@ -80,6 +100,7 @@ export interface MatchSnapshot {
   source: "txline" | "openligadb" | "statsbomb" | "demo";
   oracleProof?: string;
   events: MatchEvent[];
+  lineups?: Record<string, TeamLineup>;
 }
 
 export interface PositionContext {

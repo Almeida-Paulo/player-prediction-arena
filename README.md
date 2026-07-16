@@ -13,9 +13,8 @@ Usuario
       -> /             frontend React/Vite em /var/www/player-arena
       -> /api          proxy para FastAPI em 127.0.0.1:3001
           -> PostgreSQL
-          -> TXLine
-          -> OpenLigaDB fallback
-          -> StatsBomb Open Data futuro
+          -> TXLine obrigatorio para fixtures da Copa
+          -> APIs auxiliares gratuitas quando houver mapeamento confiavel
 ```
 
 ## Stack
@@ -26,8 +25,9 @@ Usuario
 - Reverse proxy: Nginx.
 - Processo: systemd.
 - Dominio: Cloudflare DNS/proxy.
-- Dados obrigatorios: TXLine.
-- Dados gratuitos/fallback: OpenLigaDB, StatsBomb Open Data, rating local.
+- Dados obrigatorios de partidas: TXLine.
+- Dados auxiliares gratuitos: TheSportsDB/OpenLigaDB/StatsBomb somente quando houver mapeamento confiavel.
+- `ALLOW_DEMO_DATA=false` em producao para nao publicar jogos ficticios.
 
 ## Regras implementadas
 
@@ -214,11 +214,16 @@ DATABASE_URL=postgresql://arena:troque-esta-senha@127.0.0.1:5432/player_arena
 CORS_ORIGINS=https://arena.seudominio.com
 TXLINE_API_BASE=https://txline.txodds.com
 TXLINE_API_TOKEN=COLE_SEU_TOKEN_TXLINE
+TXLINE_GUEST_JWT=
+TXLINE_COMPETITION_ID=
 TXLINE_NETWORK=devnet
 OPENLIGADB_BASE=https://api.openligadb.de
+ALLOW_DEMO_DATA=false
 ```
 
-Observacao: se ainda nao tiver token TXLine, deixe `TXLINE_API_TOKEN=` vazio. A API cai para OpenLigaDB e depois para dados demo.
+`TXLINE_API_TOKEN` e o token ativado retornado por `/api/token/activate`. `TXLINE_GUEST_JWT` pode ficar vazio; o backend tenta criar uma sessao guest automaticamente em `/auth/guest/start`.
+
+Em producao, se `TXLINE_API_TOKEN` estiver vazio ou invalido, `/api/matches` retorna `503` em vez de mostrar mockups. Para uma demo local controlada, use `ALLOW_DEMO_DATA=true`.
 
 ## 6. Criar servico systemd
 
@@ -496,7 +501,7 @@ Adaptador TXLine:
 server/app/services/txline.py
 ```
 
-Adaptador gratuito OpenLigaDB:
+Adaptador auxiliar OpenLigaDB, apenas quando `ALLOW_DEMO_DATA=true`:
 
 ```text
 server/app/services/openligadb.py
@@ -504,27 +509,26 @@ server/app/services/openligadb.py
 
 ## 15. Observacao importante sobre TXLine
 
-O adaptador inicial usa:
+O adaptador usa:
 
 ```text
 /api/fixtures/snapshot
 ```
 
-Quando voce tiver o token e um payload real, ajuste:
+As chamadas reais enviam dois headers:
+
+```text
+Authorization: Bearer <guest_jwt>
+X-Api-Token: <activated_api_token>
+```
+
+Se a TXLine retornar nomes de campos diferentes no payload real, ajuste:
 
 ```text
 server/app/services/txline.py
 ```
 
-Principalmente:
-
-- id da fixture;
-- nomes dos times;
-- placar;
-- status;
-- eventos com jogador;
-- prova/oracle;
-- tags especiais como bicicleta e olimpico, se existirem.
+Principalmente id da fixture, nomes dos times, placar, status, eventos com jogador, logos e tags especiais como bicicleta/olimpico, se existirem.
 
 ## 16. Ordem recomendada para primeiro deploy
 
@@ -538,4 +542,4 @@ Principalmente:
 8. Configurar Nginx.
 9. Apontar Cloudflare.
 10. Abrir `https://arena.seudominio.com`.
-11. Só depois conectar token real da TXLine.
+11. Conectar token real da TXLine antes de divulgar o dominio.

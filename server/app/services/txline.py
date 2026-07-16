@@ -10,48 +10,109 @@ async def fetch_txline_matches(settings: Settings) -> list[dict[str, Any]] | Non
         return None
 
     base = settings.txline_api_base.rstrip("/")
-    params: dict[str, str] = {}
-    if settings.txline_network:
-        params["network"] = settings.txline_network
 
-    async with httpx.AsyncClient(timeout=12) as client:
-        response = await client.get(
-            f"{base}/api/fixtures/snapshot",
-            headers={
-                "Accept": "application/json",
-                "Authorization": f"Bearer {settings.txline_api_token}",
-            },
-            params=params,
-        )
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            guest_jwt = settings.txline_guest_jwt or await start_guest_session(client, base)
+            if not guest_jwt:
+                return None
+
+            response = await fetch_fixtures_snapshot(client, base, settings, guest_jwt)
+
+            if response.status_code == 401 and not settings.txline_guest_jwt:
+                guest_jwt = await start_guest_session(client, base)
+                if not guest_jwt:
+                    return None
+                response = await fetch_fixtures_snapshot(client, base, settings, guest_jwt)
+    except httpx.HTTPError:
+        return None
 
     if response.status_code >= 400:
         return None
 
-    payload = response.json()
-    items = payload if isinstance(payload, list) else payload.get("data", [])
-    matches = [mapped for item in items if (mapped := map_txline_fixture(item))]
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+
+    if isinstance(payload, list):
+        items = payload
+    elif isinstance(payload, dict):
+        items = payload.get("data", [])
+    else:
+        items = []
+
+    mapped_pairs = [
+        (item, mapped)
+        for item in items
+        if isinstance(item, dict) and (mapped := map_txline_fixture(item))
+    ]
+    world_cup_matches = [mapped for item, mapped in mapped_pairs if is_world_cup_fixture(item)]
+    matches = world_cup_matches or [mapped for _, mapped in mapped_pairs]
     return matches or None
 
 
-def map_txline_fixture(item: dict[str, Any]) -> dict[str, Any] | None:
-    fixture_id = str(item.get("fixtureId") or item.get("id") or "")
-    home = item.get("homeTeam") or item.get("home")
-    away = item.get("awayTeam") or item.get("away")
-    if not fixture_id or not home or not away:
+async def start_guest_session(client: httpx.AsyncClient, base: str) -> str | None:
+    try:
+        response = await client.post(f"{base}/auth/guest/start", headers={"Accept": "application/json"})
+        if response.status_code >= 400:
+            return None
+        payload = response.json()
+    except (httpx.HTTPError, ValueError):
         return None
 
-    status = normalize_status(str(item.get("status") or ""))
-    score = item.get("score") or {home: 0, away: 0}
+    token = payload.get("token") if isinstance(payload, dict) else payload
+    return token if isinstance(token, str) and token else None
+
+
+async def fetch_fixtures_snapshot(
+    client: httpx.AsyncClient,
+    base: str,
+    settings: Settings,
+    guest_jwt: str,
+) -> httpx.Response:
+    params: dict[str, str] = {}
+    if settings.txline_competition_id:
+        params["competitionId"] = settings.txline_competition_id
+
+    return await client.get(
+        f"{base}/api/fixtures/snapshot",
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {guest_jwt}",
+            "X-Api-Token": settings.txline_api_token,
+        },
+        params=params,
+    )
+
+
+def map_txline_fixture(item: dict[str, Any]) -> dict[str, Any] | None:
+    fixture_id = str(first_value(item, "FixtureId", "fixtureId", "id") or "")
+    participant_1 = str(first_value(item, "Participant1", "participant1", "homeTeam", "home") or "")
+    participant_2 = str(first_value(item, "Participant2", "participant2", "awayTeam", "away") or "")
+    if not fixture_id or not participant_1 or not participant_2:
+        return None
+
+    participant_1_is_home = parse_bool(first_value(item, "Participant1IsHome", "participant1IsHome"), True)
+    home = participant_1 if participant_1_is_home else participant_2
+    away = participant_2 if participant_1_is_home else participant_1
+    home_score, away_score = score_from_item(item, home, away, participant_1_is_home)
+    status = normalize_status(item)
 
     return {
         "id": fixture_id,
         "home": home,
         "away": away,
-        "homeCode": home[:3].upper(),
-        "awayCode": away[:3].upper(),
-        "minute": str(item.get("minute") or ("FT" if status == "FINAL" else "0'")),
+        "homeCode": team_code(home),
+        "awayCode": team_code(away),
+        "homeLogoUrl": first_value(item, "HomeLogoUrl", "homeLogoUrl", "HomeBadge", "homeBadge"),
+        "awayLogoUrl": first_value(item, "AwayLogoUrl", "awayLogoUrl", "AwayBadge", "awayBadge"),
+        "competition": first_value(item, "Competition", "competition", "CompetitionName", "competitionName", "Country"),
+        "round": first_value(item, "Fixture", "fixture", "Group", "group"),
+        "startTime": first_value(item, "StartTime", "startTime", "start_time"),
+        "minute": str(first_value(item, "Minute", "minute") or ("FT" if status == "FINAL" else "0'")),
         "status": status,
-        "score": score,
+        "score": {home: home_score, away: away_score},
         "stats": {
             home: {"possession": 50, "shotsAgainst": 0, "cornersAgainst": 0},
             away: {"possession": 50, "shotsAgainst": 0, "cornersAgainst": 0},
@@ -60,14 +121,104 @@ def map_txline_fixture(item: dict[str, Any]) -> dict[str, Any] | None:
         "mom": home,
         "source": "txline",
         "oracleProof": f"txline:{fixture_id}",
-        "events": [],
+        "events": map_events(item, home, away),
     }
 
 
-def normalize_status(value: str) -> str:
-    status = value.lower()
-    if "final" in status or "finished" in status:
-        return "FINAL"
-    if "live" in status or "running" in status or "inplay" in status:
+def first_value(item: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = item.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def parse_bool(value: Any, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y"}
+    return default
+
+
+def normalize_status(item: dict[str, Any]) -> str:
+    value = first_value(item, "status", "Status", "GameState", "gameState")
+    raw = str(value or "").lower()
+    if raw in {"2", "3", "4", "5"} or any(term in raw for term in ["live", "running", "inplay", "period"]):
         return "LIVE"
+    if any(term in raw for term in ["final", "finished", "complete", "closed", "settled"]):
+        return "FINAL"
     return "SCHEDULED"
+
+
+def score_from_item(item: dict[str, Any], home: str, away: str, participant_1_is_home: bool) -> tuple[int, int]:
+    score = first_value(item, "score", "Score")
+    if isinstance(score, dict):
+        return safe_int(score.get(home, 0)), safe_int(score.get(away, 0))
+
+    home_score = first_value(item, "HomeScore", "homeScore", "home_score")
+    away_score = first_value(item, "AwayScore", "awayScore", "away_score")
+    if home_score is not None and away_score is not None:
+        return safe_int(home_score), safe_int(away_score)
+
+    participant_1_score = first_value(item, "Participant1Score", "participant1Score", "Score1", "score1")
+    participant_2_score = first_value(item, "Participant2Score", "participant2Score", "Score2", "score2")
+    if participant_1_score is not None and participant_2_score is not None:
+        p1 = safe_int(participant_1_score)
+        p2 = safe_int(participant_2_score)
+        return (p1, p2) if participant_1_is_home else (p2, p1)
+
+    return 0, 0
+
+
+def map_events(item: dict[str, Any], home: str, away: str) -> list[dict[str, Any]]:
+    raw_events = first_value(item, "Events", "events", "ScoreEvents", "scoreEvents")
+    if not isinstance(raw_events, list):
+        return []
+
+    events: list[dict[str, Any]] = []
+    for event in raw_events:
+        if not isinstance(event, dict):
+            continue
+        event_type = str(first_value(event, "type", "Type", "eventType", "EventType") or "").lower()
+        if "goal" not in event_type:
+            continue
+        team = str(first_value(event, "team", "Team", "participant", "Participant") or home)
+        if team not in {home, away}:
+            team = home
+        player = str(first_value(event, "player", "Player", "playerName", "PlayerName") or "Unknown player")
+        minute = safe_int(first_value(event, "minute", "Minute"))
+        tags = first_value(event, "tags", "Tags") or []
+        if isinstance(tags, str):
+            tags = [tags]
+        if not isinstance(tags, list):
+            tags = []
+        events.append({"type": "goal", "team": team, "player": player, "minute": minute, "tags": tags})
+    return events
+
+
+def safe_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def is_world_cup_fixture(item: dict[str, Any]) -> bool:
+    text = " ".join(
+        str(first_value(item, key) or "")
+        for key in ["Competition", "competition", "CompetitionName", "competitionName", "Fixture", "fixture", "Group", "group"]
+    ).lower()
+    return "world cup" in text
+
+
+def team_code(name: str) -> str:
+    clean = "".join(char for char in name.upper() if char.isalnum() or char.isspace()).strip()
+    parts = clean.split()
+    if len(parts) > 1:
+        return "".join(part[0] for part in parts[:3])[:3]
+    return clean[:3]

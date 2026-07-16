@@ -17,39 +17,39 @@ class Card:
 
 
 CARDS: list[Card] = [
-    Card("gol", "moment", "Gol", "basic", 40, "Jogador ou equipe escolhida marca gol.", "goal", ["txline.score_events"]),
-    Card("clean-sheet", "moment", "Clean Sheet", "basic", 100, "Equipe escolhida termina sem sofrer gol.", "clean_sheet", ["txline.final_score"]),
-    Card("hat-trick", "moment", "Hat-Trick", "rare", 500, "Mesmo jogador marca 3 gols.", "hat_trick", ["txline.score_events.player_id"]),
-    Card("ultimo-lance", "moment", "Ultimo Lance", "rare", 600, "Ultimo gol/evento decisivo muda o resultado.", "last_touch", ["txline.score_events.minute"]),
-    Card("rolo-compressor", "moment", "Rolo Compressor", "rare", 600, "Equipe escolhida vence por 4+ gols.", "steamroller", ["txline.final_score"]),
-    Card("bicicleta", "moment", "Gol de Bicicleta", "legendary", 1200, "Gol classificado como bicicleta.", "bicycle_goal", ["secondary.event_tag_or_manual_review"]),
-    Card("olimpico", "moment", "Olimpico", "legendary", 1400, "Gol direto de escanteio.", "olympic_goal", ["secondary.event_tag_or_manual_review"]),
-    Card("poker-trick", "moment", "Poker-Trick", "legendary", 1600, "Mesmo jogador marca 4 gols.", "poker_trick", ["txline.score_events.player_id"]),
-    Card("penta-trick", "moment", "Penta-Trick", "legendary", 2000, "Mesmo jogador marca 5 gols.", "penta_trick", ["txline.score_events.player_id"]),
-    Card("mom", "power", "MOM", "legendary", 1000, "Jogador escolhido e o melhor avaliado da partida.", "mom", ["local_rating_or_secondary_ratings"]),
-    Card("tiki-taka", "historic", "Tiki-Taka", "rare", 300, "Equipe escolhida termina com posse maior que 60%.", "tiki_taka", ["secondary.team_stats.possession"]),
-    Card("catenaccio", "historic", "Catenaccio", "rare", 400, "Clean sheet sob pressao: posse <45%, 12+ finalizacoes contra ou 6+ escanteios contra.", "catenaccio", ["txline.final_score", "secondary.team_stats"]),
-    Card("carrousel", "historic", "Carrousel", "legendary", 1000, "4+ jogadores diferentes marcam pela equipe escolhida.", "carrousel", ["txline.score_events.player_id"]),
-    Card("jogo-bonito", "historic", "Jogo Bonito", "rare", 600, "Equipe marca 3+ gols e vence por 3+ gols.", "jogo_bonito", ["txline.final_score"]),
+    Card("gol", "moment", "Goal", "basic", 40, "Selected player or team scores.", "goal", ["txline.score_events"]),
+    Card("clean-sheet", "moment", "Clean Sheet", "basic", 100, "Selected team finishes without conceding.", "clean_sheet", ["txline.final_score"]),
+    Card("hat-trick", "moment", "Hat-Trick", "rare", 500, "Same player scores 3 goals.", "hat_trick", ["txline.score_events.player_id"]),
+    Card("ultimo-lance", "moment", "Last Touch", "rare", 600, "Final decisive goal changes the result state.", "last_touch", ["txline.score_events.minute"]),
+    Card("rolo-compressor", "moment", "Steamroller", "rare", 600, "Selected team wins by 4+ goals.", "steamroller", ["txline.final_score"]),
+    Card("bicicleta", "moment", "Bicycle Kick", "legendary", 1200, "Goal is tagged as a bicycle kick.", "bicycle_goal", ["secondary.event_tag_or_manual_review"]),
+    Card("olimpico", "moment", "Olympic Goal", "legendary", 1400, "Direct goal from a corner kick.", "olympic_goal", ["secondary.event_tag_or_manual_review"]),
+    Card("poker-trick", "moment", "Poker-Trick", "legendary", 1600, "Same player scores 4 goals.", "poker_trick", ["txline.score_events.player_id"]),
+    Card("penta-trick", "moment", "Penta-Trick", "legendary", 2000, "Same player scores 5 goals.", "penta_trick", ["txline.score_events.player_id"]),
+    Card("mom", "power", "MOM", "legendary", 1000, "Selected player is the top-rated player of the match.", "mom", ["local_rating_or_secondary_ratings"]),
+    Card("tiki-taka", "historic", "Tiki-Taka", "rare", 300, "Selected team finishes with more than 60% possession.", "tiki_taka", ["secondary.team_stats.possession"]),
+    Card("catenaccio", "historic", "Catenaccio", "rare", 400, "Clean sheet under pressure: possession below 45%, 12+ shots faced, or 6+ corners faced.", "catenaccio", ["txline.final_score", "secondary.team_stats"]),
+    Card("carrousel", "historic", "Carrousel", "legendary", 1000, "4+ different players score for the selected team.", "carrousel", ["txline.score_events.player_id"]),
+    Card("jogo-bonito", "historic", "Jogo Bonito", "rare", 600, "Team scores 3+ and wins by a 3+ goal margin.", "jogo_bonito", ["txline.final_score"]),
 ]
 
 BADGES: list[dict[str, str]] = [
-    {"id": "starter-scout", "name": "Starter Scout", "condition": "Abrir o primeiro Starter Pack.", "category": "onboarding"},
-    {"id": "pack-runner", "name": "Pack Runner", "condition": "Criar 10 apostas e liberar o pack inicial.", "category": "onboarding"},
-    {"id": "sharp-scout", "name": "Sharp Scout", "condition": "Acertar 3 previsoes seguidas.", "category": "prediction"},
-    {"id": "live-trader", "name": "Live Trader", "condition": "Criar 3 apostas na mesma partida.", "category": "prediction"},
-    {"id": "risk-manager", "name": "Risk Manager", "condition": "Vencer uma aposta com stake de ate 10% do saldo pre-aposta.", "category": "risk"},
-    {"id": "oracle-believer", "name": "Oracle Believer", "condition": "Liquidar uma previsao com prova TXLine.", "category": "oracle"},
-    {"id": "legend-caller", "name": "Legend Caller", "condition": "Ativar uma carta lendaria em uma previsao vencedora.", "category": "prediction"},
+    {"id": "starter-scout", "name": "Starter Scout", "condition": "Open the first Starter Pack.", "category": "onboarding"},
+    {"id": "pack-runner", "name": "Pack Runner", "condition": "Place 10 predictions and unlock the starter pack.", "category": "onboarding"},
+    {"id": "sharp-scout", "name": "Sharp Scout", "condition": "Win 3 predictions in a row.", "category": "prediction"},
+    {"id": "live-trader", "name": "Live Trader", "condition": "Create 3 predictions on the same match.", "category": "prediction"},
+    {"id": "risk-manager", "name": "Risk Manager", "condition": "Win a prediction with stake up to 10% of pre-trade balance.", "category": "risk"},
+    {"id": "oracle-believer", "name": "Oracle Believer", "condition": "Settle a prediction with a TXLine proof.", "category": "oracle"},
+    {"id": "legend-caller", "name": "Legend Caller", "condition": "Activate a legendary card on a winning prediction.", "category": "prediction"},
 ]
 
 MARKETS: list[dict[str, Any]] = [
-    {"id": "home-win", "label": "Mandante vence", "kind": "result", "oddsBps": 17400, "settlementKey": "home_win"},
-    {"id": "away-win", "label": "Visitante vence", "kind": "result", "oddsBps": 21800, "settlementKey": "away_win"},
-    {"id": "home-goal", "label": "Mandante marca", "kind": "goal", "oddsBps": 12800, "settlementKey": "home_scores"},
-    {"id": "home-clean-sheet", "label": "Mandante clean sheet", "kind": "defense", "oddsBps": 26500, "settlementKey": "home_clean_sheet"},
-    {"id": "hat-trick-market", "label": "Algum hat-trick", "kind": "player", "oddsBps": 56000, "settlementKey": "any_hat_trick"},
-    {"id": "mom-home-team", "label": "MOM joga no mandante", "kind": "rating", "oddsBps": 34000, "settlementKey": "mom_home_team"},
+    {"id": "home-win", "label": "Home team wins", "kind": "result", "oddsBps": 17400, "settlementKey": "home_win"},
+    {"id": "away-win", "label": "Away team wins", "kind": "result", "oddsBps": 21800, "settlementKey": "away_win"},
+    {"id": "home-goal", "label": "Home team scores", "kind": "goal", "oddsBps": 12800, "settlementKey": "home_scores"},
+    {"id": "home-clean-sheet", "label": "Home team clean sheet", "kind": "defense", "oddsBps": 26500, "settlementKey": "home_clean_sheet"},
+    {"id": "hat-trick-market", "label": "Any hat-trick", "kind": "player", "oddsBps": 56000, "settlementKey": "any_hat_trick"},
+    {"id": "mom-home-team", "label": "MOM from home team", "kind": "rating", "oddsBps": 34000, "settlementKey": "mom_home_team"},
 ]
 
 
