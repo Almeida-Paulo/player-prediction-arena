@@ -1,0 +1,166 @@
+import type { MarketDefinition, MatchEvent, MatchSnapshot } from "./types";
+
+export const markets: MarketDefinition[] = [
+  {
+    id: "home-win",
+    label: "Mandante vence",
+    kind: "result",
+    oddsBps: 17400,
+    settlementKey: "home_win",
+  },
+  {
+    id: "away-win",
+    label: "Visitante vence",
+    kind: "result",
+    oddsBps: 21800,
+    settlementKey: "away_win",
+  },
+  {
+    id: "home-goal",
+    label: "Mandante marca",
+    kind: "goal",
+    oddsBps: 12800,
+    settlementKey: "home_scores",
+  },
+  {
+    id: "home-clean-sheet",
+    label: "Mandante clean sheet",
+    kind: "defense",
+    oddsBps: 26500,
+    settlementKey: "home_clean_sheet",
+  },
+  {
+    id: "hat-trick-market",
+    label: "Algum hat-trick",
+    kind: "player",
+    oddsBps: 56000,
+    settlementKey: "any_hat_trick",
+  },
+  {
+    id: "mom-home-team",
+    label: "MOM joga no mandante",
+    kind: "rating",
+    oddsBps: 34000,
+    settlementKey: "mom_home_team",
+  },
+];
+
+export const demoMatches: MatchSnapshot[] = [
+  {
+    id: "bra-arg",
+    home: "Brasil",
+    away: "Argentina",
+    homeCode: "BRA",
+    awayCode: "ARG",
+    minute: "78'",
+    status: "LIVE",
+    score: { Brasil: 4, Argentina: 1 },
+    stats: {
+      Brasil: { possession: 64, shotsAgainst: 8, cornersAgainst: 3 },
+      Argentina: { possession: 36, shotsAgainst: 16, cornersAgainst: 8 },
+    },
+    ratings: {
+      Valente: 8.9,
+      Aurora: 8.1,
+      Nilo: 7.7,
+      Reis: 7.5,
+      Ortega: 7.1,
+    },
+    mom: "Valente",
+    source: "demo",
+    oracleProof: "demo-txline-merkle-proof:bra-arg",
+    events: [
+      goal("Brasil", "Aurora", 12),
+      goal("Argentina", "Ortega", 30),
+      goal("Brasil", "Valente", 44, ["bicycle"]),
+      goal("Brasil", "Nilo", 76),
+      goal("Brasil", "Reis", 90, ["stoppage"]),
+    ],
+  },
+  {
+    id: "nld-jpn",
+    home: "Holanda",
+    away: "Japao",
+    homeCode: "NLD",
+    awayCode: "JPN",
+    minute: "FT",
+    status: "FINAL",
+    score: { Holanda: 1, Japao: 0 },
+    stats: {
+      Holanda: { possession: 42, shotsAgainst: 15, cornersAgainst: 7 },
+      Japao: { possession: 58, shotsAgainst: 6, cornersAgainst: 2 },
+    },
+    ratings: {
+      Vermeer: 8.7,
+      Kaito: 7.4,
+      Daan: 7.1,
+    },
+    mom: "Vermeer",
+    source: "demo",
+    oracleProof: "demo-txline-merkle-proof:nld-jpn",
+    events: [goal("Holanda", "Daan", 71)],
+  },
+  {
+    id: "fra-prt",
+    home: "Franca",
+    away: "Portugal",
+    homeCode: "FRA",
+    awayCode: "POR",
+    minute: "90+5'",
+    status: "LIVE",
+    score: { Franca: 3, Portugal: 3 },
+    stats: {
+      Franca: { possession: 52, shotsAgainst: 11, cornersAgainst: 5 },
+      Portugal: { possession: 48, shotsAgainst: 13, cornersAgainst: 6 },
+    },
+    ratings: {
+      Moreau: 9.2,
+      Lemos: 8.5,
+      Duarte: 7.8,
+    },
+    mom: "Moreau",
+    source: "demo",
+    oracleProof: "demo-txline-merkle-proof:fra-prt",
+    events: [
+      goal("Franca", "Moreau", 8),
+      goal("Portugal", "Lemos", 22),
+      goal("Franca", "Moreau", 48),
+      goal("Portugal", "Duarte", 66),
+      goal("Portugal", "Lemos", 89),
+      goal("Franca", "Moreau", 95, ["decisive", "stoppage"]),
+    ],
+  },
+  {
+    id: "mex-usa",
+    home: "Mexico",
+    away: "Estados Unidos",
+    homeCode: "MEX",
+    awayCode: "USA",
+    minute: "FT",
+    status: "FINAL",
+    score: { Mexico: 5, "Estados Unidos": 0 },
+    stats: {
+      Mexico: { possession: 57, shotsAgainst: 4, cornersAgainst: 1 },
+      "Estados Unidos": { possession: 43, shotsAgainst: 21, cornersAgainst: 9 },
+    },
+    ratings: {
+      Solano: 9.7,
+      Rivas: 8.2,
+      Brooks: 5.9,
+    },
+    mom: "Solano",
+    source: "demo",
+    oracleProof: "demo-txline-merkle-proof:mex-usa",
+    events: [
+      goal("Mexico", "Solano", 9),
+      goal("Mexico", "Solano", 27),
+      goal("Mexico", "Rivas", 33, ["olympic"]),
+      goal("Mexico", "Solano", 58),
+      goal("Mexico", "Solano", 82),
+    ],
+  },
+];
+
+function goal(team: string, player: string, minute: number, tags: string[] = []): MatchEvent {
+  return { type: "goal", team, player, minute, tags };
+}

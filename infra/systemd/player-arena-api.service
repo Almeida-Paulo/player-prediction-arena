@@ -1,0 +1,16 @@
+[Unit]
+Description=Player Prediction Arena FastAPI
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=arena
+Group=arena
+WorkingDirectory=/home/arena/player-prediction-arena/server
+EnvironmentFile=/home/arena/player-prediction-arena/server/.env
+ExecStart=/home/arena/player-prediction-arena/server/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 3001
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
