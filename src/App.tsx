@@ -28,7 +28,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import worldCupLogo from "../assets/fifa-world-cup-2026-logo-footylogos.svg";
 import predictionLogo from "../assets/Prediction-Arena-logo.png";
-import txoddsLogo from "../assets/txodds-logo.svg";
+import txoddsLogo from "../assets/TxODDS-Blue-on-Transparent-300x60.png.webp";
 import { skillBadges } from "../shared/badges";
 import { cards as cardCatalog, starterPackPool } from "../shared/cards";
 import { markets as marketCatalog } from "../shared/demo-data";
@@ -760,7 +760,7 @@ function OddsStrip({ odds }: { odds: MatchSnapshot["odds"] }) {
             <span className="result-odd" key={odd.id}>
               <small>{odd.shortLabel || shortOddsLabel(odd)}</small>
               <strong>{odd.selection}</strong>
-              <em>{formatOdd(odd)}</em>
+              <em>{formatResultOdd(odd)}</em>
             </span>
           ))}
         </div>
@@ -1603,6 +1603,13 @@ function formatOdd(odd: NonNullable<MatchSnapshot["odds"]>[number]): string {
   return "Live";
 }
 
+function formatResultOdd(odd: NonNullable<MatchSnapshot["odds"]>[number]): string {
+  if (odd.decimal) return odd.decimal.toFixed(2);
+  if (odd.impliedProbability) return `${(odd.impliedProbability * 100).toFixed(1)}%`;
+  if (odd.american) return odd.american > 0 ? `+${odd.american}` : String(odd.american);
+  return "--";
+}
+
 function cleanMarketLabel(value: string): string {
   return value
     .replace(/[_-]+/g, " ")
@@ -1612,14 +1619,20 @@ function cleanMarketLabel(value: string): string {
 }
 
 function resultOdds(odds: NonNullable<MatchSnapshot["odds"]>): NonNullable<MatchSnapshot["odds"]> {
-  const resultMarket = odds
-    .filter((odd) => {
-      const market = odd.market.toLowerCase();
-      return market.includes("1x2") || market.includes("participant result") || market.includes("result");
-    })
-    .filter((odd) => odd.selectionRole === "home" || odd.selectionRole === "draw" || odd.selectionRole === "away");
-  const displayOdds = resultMarket.length >= 3 ? resultMarket : odds;
-  return [...displayOdds].sort((a, b) => (a.sortOrder ?? 3) - (b.sortOrder ?? 3)).slice(0, 3);
+  const resultMarket = odds.filter(isMatchResultOdd);
+  const byRole = new Map(resultMarket.map((odd) => [odd.selectionRole, odd]));
+  const ordered = [byRole.get("home"), byRole.get("draw"), byRole.get("away")].filter(
+    (odd): odd is NonNullable<MatchSnapshot["odds"]>[number] => Boolean(odd),
+  );
+  return ordered.length === 3 ? ordered : [];
+}
+
+function isMatchResultOdd(odd: NonNullable<MatchSnapshot["odds"]>[number]): boolean {
+  const market = odd.market.toLowerCase();
+  const isResultMarket =
+    market.includes("1x2 participant result") ||
+    (market.includes("1x2") && market.includes("participant") && market.includes("result"));
+  return isResultMarket && (odd.selectionRole === "home" || odd.selectionRole === "draw" || odd.selectionRole === "away");
 }
 
 function shortOddsLabel(odd: NonNullable<MatchSnapshot["odds"]>[number]): string {

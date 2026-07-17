@@ -369,7 +369,6 @@ p {
   display: inline-flex;
   height: 52px;
   justify-content: center;
-  overflow: hidden;
   width: 52px;
 }
 
@@ -381,7 +380,7 @@ p {
   width: auto;
 }
 
-.market-type span {
+.market-type > div > span {
   color: var(--faint);
   display: block;
   font-size: 15px;
@@ -389,7 +388,7 @@ p {
   margin-bottom: 3px;
 }
 
-.market-type strong {
+.market-type > div > strong {
   display: block;
   font-size: 17px;
 }
