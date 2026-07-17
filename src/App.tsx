@@ -2,7 +2,10 @@ import {
   BadgeCheck,
   BarChart3,
   Bookmark,
+  Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   CircleDollarSign,
   Clock3,
   Gift,
@@ -19,6 +22,7 @@ import {
   TrendingUp,
   User,
   Users,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
@@ -105,6 +109,7 @@ export function App() {
   const [loadError, setLoadError] = useState("");
   const [activeView, setActiveView] = useState<AccountView>("home");
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [cardPickerOpen, setCardPickerOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -179,8 +184,6 @@ export function App() {
     ? state.positions.filter((position) => position.matchId === selectedMatch.id)
     : [];
   const earnedBadges = getEarnedBadges(state, allCards);
-  const homeStats = selectedMatch ? teamStats(selectedMatch, selectedMatch.home) : null;
-  const awayStats = selectedMatch ? teamStats(selectedMatch, selectedMatch.away) : null;
   const potentialGross = selectedMarket ? Math.floor((stake * selectedMarket.oddsBps) / 10000) : 0;
   const potentialProfit = Math.max(0, potentialGross - stake);
   const maxBonusBps = selectedCards.reduce((sum, card) => sum + card.bonusBps, 0);
@@ -208,6 +211,7 @@ export function App() {
     setMomentCardId("");
     setPowerCardId("");
     setHistoricCardId("");
+    setCardPickerOpen(false);
     setActiveView("home");
   }
 
@@ -216,8 +220,16 @@ export function App() {
     setMomentCardId("");
     setPowerCardId("");
     setHistoricCardId("");
+    setCardPickerOpen(false);
     setActiveView("home");
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function selectAdjacentMatch(direction: -1 | 1) {
+    if (!selectedMatch || matches.length < 2) return;
+    const currentIndex = Math.max(0, matches.findIndex((match) => match.id === selectedMatch.id));
+    const nextIndex = (currentIndex + direction + matches.length) % matches.length;
+    selectMatch(matches[nextIndex].id);
   }
 
   function placePrediction() {
@@ -401,25 +413,20 @@ export function App() {
             {selectedMatch && selectedMarket ? (
               <FeaturedMarket
                 activity={featuredActivity}
-                awayStats={awayStats}
-                cards={allCards}
-                historicCardId={historicCardId}
-                homeStats={homeStats}
-                lockedForMatch={lockedForMatch}
                 market={selectedMarket}
                 match={selectedMatch}
+                matchIndex={Math.max(0, matches.findIndex((match) => match.id === selectedMatch.id))}
                 maxBonus={maxBonus}
-                momentCardId={momentCardId}
-                ownedInventory={state.inventory}
+                matchTotal={matches.length}
                 potentialGross={potentialGross}
                 potentialProfit={potentialProfit}
-                powerCardId={powerCardId}
+                selectedCards={selectedCards}
                 stake={stake}
-                onChangeHistoricCard={setHistoricCardId}
-                onChangeMomentCard={setMomentCardId}
-                onChangePowerCard={setPowerCardId}
                 onChangeStake={setStake}
+                onNextMatch={() => selectAdjacentMatch(1)}
+                onOpenCardPicker={() => setCardPickerOpen(true)}
                 onPlacePrediction={placePrediction}
+                onPreviousMatch={() => selectAdjacentMatch(-1)}
                 onSettle={settleMatch}
                 onShowToast={showToast}
               />
@@ -492,6 +499,19 @@ export function App() {
         />
       )}
 
+      {cardPickerOpen && (
+        <CardPickerModal
+          cards={allCards}
+          inventory={state.inventory}
+          locked={lockedForMatch}
+          selected={{ historic: historicCardId, moment: momentCardId, power: powerCardId }}
+          onChangeHistoric={setHistoricCardId}
+          onChangeMoment={setMomentCardId}
+          onChangePower={setPowerCardId}
+          onClose={() => setCardPickerOpen(false)}
+        />
+      )}
+
       <div className={`toast ${state.toast ? "is-visible" : ""}`} role="status" aria-live="polite">
         {state.toast}
       </div>
@@ -506,54 +526,47 @@ export function App() {
 
 function FeaturedMarket({
   activity,
-  awayStats,
-  cards,
-  historicCardId,
-  homeStats,
-  lockedForMatch,
   market,
   match,
+  matchIndex,
   maxBonus,
-  momentCardId,
-  ownedInventory,
+  matchTotal,
   potentialGross,
   potentialProfit,
-  powerCardId,
+  selectedCards,
   stake,
-  onChangeHistoricCard,
-  onChangeMomentCard,
-  onChangePowerCard,
   onChangeStake,
+  onNextMatch,
+  onOpenCardPicker,
   onPlacePrediction,
+  onPreviousMatch,
   onSettle,
   onShowToast,
 }: {
   activity: MarketActivity;
-  awayStats: ReturnType<typeof teamStats> | null;
-  cards: CardDefinition[];
-  historicCardId: string;
-  homeStats: ReturnType<typeof teamStats> | null;
-  lockedForMatch: Set<string>;
   market: MarketDefinition;
   match: MatchSnapshot;
+  matchIndex: number;
   maxBonus: number;
-  momentCardId: string;
-  ownedInventory: string[];
+  matchTotal: number;
   potentialGross: number;
   potentialProfit: number;
-  powerCardId: string;
+  selectedCards: CardDefinition[];
   stake: number;
-  onChangeHistoricCard: (value: string) => void;
-  onChangeMomentCard: (value: string) => void;
-  onChangePowerCard: (value: string) => void;
   onChangeStake: (value: number) => void;
+  onNextMatch: () => void;
+  onOpenCardPicker: () => void;
   onPlacePrediction: () => void;
+  onPreviousMatch: () => void;
   onSettle: () => void;
   onShowToast: (message: string) => void;
 }) {
   const yesPercent = impliedProbability(market.oddsBps);
   const noPercent = 100 - yesPercent;
   const [primaryLabel, secondaryLabel] = outcomeLabels(market, match);
+  const selectedCardLabel = selectedCards.length
+    ? selectedCards.map((card) => card.name).join(", ")
+    : "No cards selected";
 
   return (
     <section className="featured-market-card">
@@ -568,6 +581,17 @@ function FeaturedMarket({
           </div>
         </div>
         <div className="icon-actions">
+          <div className="match-switcher" aria-label="Fixture navigation">
+            <button aria-label="Previous match" disabled={matchTotal < 2} type="button" onClick={onPreviousMatch}>
+              <ChevronLeft size={18} />
+            </button>
+            <span>
+              Match {matchIndex + 1} of {Math.max(matchTotal, 1)}
+            </span>
+            <button aria-label="Next match" disabled={matchTotal < 2} type="button" onClick={onNextMatch}>
+              <ChevronRight size={18} />
+            </button>
+          </div>
           <button aria-label="Copy market link" type="button">
             <Link2 size={18} />
           </button>
@@ -632,34 +656,12 @@ function FeaturedMarket({
           </div>
         </div>
 
-        <div className="boost-selectors">
-          <CardSelect
-            cards={cards}
-            inventory={ownedInventory}
-            label="Moment"
-            locked={lockedForMatch}
-            type="moment"
-            value={momentCardId}
-            onChange={onChangeMomentCard}
-          />
-          <CardSelect
-            cards={cards}
-            inventory={ownedInventory}
-            label="Power"
-            locked={lockedForMatch}
-            type="power"
-            value={powerCardId}
-            onChange={onChangePowerCard}
-          />
-          <CardSelect
-            cards={cards}
-            inventory={ownedInventory}
-            label="Historic"
-            locked={lockedForMatch}
-            type="historic"
-            value={historicCardId}
-            onChange={onChangeHistoricCard}
-          />
+        <div className="card-loadout-field">
+          <span>Card boosts</span>
+          <button className="card-loadout-button" type="button" onClick={onOpenCardPicker}>
+            <span>{selectedCardLabel}</span>
+            <em>{selectedCards.length}/3</em>
+          </button>
         </div>
 
         <div className="trade-actions">
@@ -676,23 +678,6 @@ function FeaturedMarket({
         </div>
       </div>
 
-      <div className="market-stat-band">
-        <StatComparison
-          label="Possession"
-          left={homeStats ? `${homeStats.possession}%` : "N/A"}
-          right={awayStats ? `${awayStats.possession}%` : "N/A"}
-        />
-        <StatComparison
-          label="Shots faced"
-          left={homeStats ? String(homeStats.shotsAgainst) : "N/A"}
-          right={awayStats ? String(awayStats.shotsAgainst) : "N/A"}
-        />
-        <StatComparison
-          label="Corners faced"
-          left={homeStats ? String(homeStats.cornersAgainst) : "N/A"}
-          right={awayStats ? String(awayStats.cornersAgainst) : "N/A"}
-        />
-      </div>
     </section>
   );
 }
@@ -710,23 +695,33 @@ function PositionShareChart({
   yesLabel: string;
   yesPercent: number;
 }) {
+  const yesLine = flatLinePoints(yesPercent);
+  const noLine = flatLinePoints(noPercent);
+
   return (
     <div className="position-chart-card">
       <div className="chart-heading">
         <div>
-          <span>Position split</span>
+          <span>Live implied probability</span>
           <strong>{Math.round(yesPercent)}%</strong>
         </div>
         <small>{activity.positions ? `${activity.positions} platform positions` : "No positions yet"}</small>
       </div>
-      <div className="position-bars" aria-label="Current position split">
-        <div className="position-bar yes" style={{ width: `${yesPercent}%` }} />
-        <div className="position-bar no" style={{ width: `${noPercent}%` }} />
-      </div>
-      <div className="chart-grid">
-        {[0, 25, 50, 75, 100].map((tick) => (
-          <span key={tick}>{tick}%</span>
-        ))}
+      <svg className="line-chart" role="img" viewBox="0 0 320 176" aria-label="Current market probability line">
+        <line className="chart-rule" x1="0" x2="320" y1="32" y2="32" />
+        <line className="chart-rule" x1="0" x2="320" y1="88" y2="88" />
+        <line className="chart-rule" x1="0" x2="320" y1="144" y2="144" />
+        <polyline className="line yes" points={yesLine} />
+        <polyline className="line no" points={noLine} />
+        <circle className="line-dot yes" cx="300" cy={chartY(yesPercent)} r="4.5" />
+        <circle className="line-dot no" cx="300" cy={chartY(noPercent)} r="4.5" />
+      </svg>
+      <div className="chart-axis">
+        <span>0%</span>
+        <span>25%</span>
+        <span>50%</span>
+        <span>75%</span>
+        <span>100%</span>
       </div>
       <div className="legend-row">
         <span>
@@ -742,6 +737,7 @@ function PositionShareChart({
         </span>
         <strong>{noPercent.toFixed(1)}%</strong>
       </div>
+      <p className="chart-note">Historical odds line appears when the connected feed exposes price history.</p>
     </div>
   );
 }
@@ -819,6 +815,8 @@ function LineupPreview({ match }: { match: MatchSnapshot }) {
   const awayLineup = match.lineups?.[match.away];
   const hasLineups = Boolean(homeLineup?.starters.length || awayLineup?.starters.length);
   const title = match.status === "SCHEDULED" ? "Expected lineups" : "Confirmed lineups";
+  const homeStats = teamStats(match, match.home);
+  const awayStats = teamStats(match, match.away);
 
   return (
     <section className="lineup-panel">
@@ -843,6 +841,11 @@ function LineupPreview({ match }: { match: MatchSnapshot }) {
             <p>Probable and confirmed XIs will appear here once a lineup provider is mapped to this fixture.</p>
           </div>
         )}
+      </div>
+      <div className="lineup-stats">
+        <StatComparison label="Possession" left={`${homeStats.possession}%`} right={`${awayStats.possession}%`} />
+        <StatComparison label="Shots faced" left={String(homeStats.shotsAgainst)} right={String(awayStats.shotsAgainst)} />
+        <StatComparison label="Corners faced" left={String(homeStats.cornersAgainst)} right={String(awayStats.cornersAgainst)} />
       </div>
     </section>
   );
@@ -1069,6 +1072,120 @@ function TeamAvatar({ code, logoUrl }: { code: string; logoUrl?: string }) {
   );
 }
 
+function CardPickerModal({
+  cards,
+  inventory,
+  locked,
+  selected,
+  onChangeHistoric,
+  onChangeMoment,
+  onChangePower,
+  onClose,
+}: {
+  cards: CardDefinition[];
+  inventory: string[];
+  locked: Set<string>;
+  selected: { historic: string; moment: string; power: string };
+  onChangeHistoric: (value: string) => void;
+  onChangeMoment: (value: string) => void;
+  onChangePower: (value: string) => void;
+  onClose: () => void;
+}) {
+  const ownedCounts = countCards(inventory);
+  const ownedCards = cards.filter((card) => ownedCounts[card.id]);
+  const selectedIds = new Set([selected.moment, selected.power, selected.historic].filter(Boolean));
+  const selectedCount = selectedIds.size;
+
+  function toggleCard(card: CardDefinition) {
+    if (locked.has(card.id) && !selectedIds.has(card.id)) return;
+    const nextValue = selectedIds.has(card.id) ? "" : card.id;
+    if (card.type === "moment") onChangeMoment(nextValue);
+    if (card.type === "power") onChangePower(nextValue);
+    if (card.type === "historic") onChangeHistoric(nextValue);
+  }
+
+  return (
+    <div className="card-modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        aria-modal="true"
+        className="card-modal"
+        role="dialog"
+        aria-labelledby="card-modal-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="card-modal-header">
+          <div>
+            <span>Prediction boosts</span>
+            <h2 id="card-modal-title">Choose up to 3 cards</h2>
+          </div>
+          <button aria-label="Close card picker" type="button" onClick={onClose}>
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="selected-loadout">
+          <LoadoutSlot label="Moment" value={cardName(cards, selected.moment)} />
+          <LoadoutSlot label="Power" value={cardName(cards, selected.power)} />
+          <LoadoutSlot label="Historic" value={cardName(cards, selected.historic)} />
+        </div>
+
+        {ownedCards.length ? (
+          <div className="card-choice-grid">
+            {ownedCards.map((card) => {
+              const isSelected = selectedIds.has(card.id);
+              const isLocked = locked.has(card.id) && !isSelected;
+              return (
+                <button
+                  className={`card-choice ${card.rarity} ${isSelected ? "is-selected" : ""}`}
+                  disabled={isLocked}
+                  key={card.id}
+                  type="button"
+                  onClick={() => toggleCard(card)}
+                >
+                  <div className="card-choice-top">
+                    <span>{card.type}</span>
+                    <strong>{formatBps(card.bonusBps)}</strong>
+                  </div>
+                  <h3>{card.name}</h3>
+                  <p>{isLocked ? "Locked for this match." : card.condition}</p>
+                  <div className="card-choice-bottom">
+                    <small>
+                      {card.rarity} x{ownedCounts[card.id]}
+                    </small>
+                    {isSelected && <Check size={18} />}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="empty-state compact">
+            <PackageOpen />
+            <strong>No cards available</strong>
+            <p>After 10 predictions, the starter pack unlocks 3 basic cards.</p>
+          </div>
+        )}
+
+        <div className="card-modal-footer">
+          <span>{selectedCount}/3 selected</span>
+          <button className="signup-button" type="button" onClick={onClose}>
+            Done
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function LoadoutSlot({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="loadout-slot">
+      <span>{label}</span>
+      <strong>{value || "Empty"}</strong>
+    </div>
+  );
+}
+
 function LineupSide({ lineup, side }: { lineup?: TeamLineup; side: "home" | "away" }) {
   if (!lineup) return null;
   return (
@@ -1098,40 +1215,6 @@ function StatComparison({ label, left, right }: { label: string; left: string; r
       <span>{label}</span>
       <strong>{right}</strong>
     </div>
-  );
-}
-
-function CardSelect({
-  cards,
-  inventory,
-  label,
-  locked,
-  onChange,
-  type,
-  value,
-}: {
-  cards: CardDefinition[];
-  inventory: string[];
-  label: string;
-  locked: Set<string>;
-  onChange: (value: string) => void;
-  type: CardType;
-  value: string;
-}) {
-  const owned = cards.filter((card) => card.type === type && inventory.includes(card.id));
-
-  return (
-    <label className="field compact-field">
-      <span>{label}</span>
-      <select value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">No card</option>
-        {owned.map((card) => (
-          <option disabled={locked.has(card.id)} key={card.id} value={card.id}>
-            {card.name} - {formatBps(card.bonusBps)}
-          </option>
-        ))}
-      </select>
-    </label>
   );
 }
 
@@ -1269,6 +1352,11 @@ function countCards(inventory: string[]): Record<string, number> {
   }, {});
 }
 
+function cardName(cards: CardDefinition[], cardId: string): string {
+  if (!cardId) return "";
+  return cards.find((card) => card.id === cardId)?.name ?? cardId;
+}
+
 function loadState(): AppState {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -1345,6 +1433,15 @@ function outcomeLabels(market: MarketDefinition, match: MatchSnapshot): [string,
   if (market.id === "home-win") return [match.home, match.away];
   if (market.id === "away-win") return [match.away, match.home];
   return ["Yes", "No"];
+}
+
+function chartY(percent: number): number {
+  return 160 - Math.max(1, Math.min(99, percent)) * 1.44;
+}
+
+function flatLinePoints(percent: number): string {
+  const y = chartY(percent);
+  return [20, 76, 132, 188, 244, 300].map((x) => `${x},${y}`).join(" ");
 }
 
 function formatCents(cents: number): string {
