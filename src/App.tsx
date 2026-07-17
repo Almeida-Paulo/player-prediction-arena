@@ -28,6 +28,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import worldCupLogo from "../assets/fifa-world-cup-2026-logo-footylogos.svg";
 import predictionLogo from "../assets/Prediction-Arena-logo.png";
+import txoddsLogo from "../assets/txodds-logo.svg";
 import { skillBadges } from "../shared/badges";
 import { cards as cardCatalog, starterPackPool } from "../shared/cards";
 import { markets as marketCatalog } from "../shared/demo-data";
@@ -564,7 +565,7 @@ function FeaturedMarket({
 }) {
   const yesPercent = impliedProbability(market.oddsBps);
   const noPercent = 100 - yesPercent;
-  const [primaryLabel, secondaryLabel] = outcomeLabels(market, match);
+  const [primaryOutcome, secondaryOutcome] = outcomeRows(market, match);
   const selectedCardLabel = selectedCards.length
     ? selectedCards.map((card) => card.name).join(", ")
     : "No cards selected";
@@ -612,12 +613,12 @@ function FeaturedMarket({
           <h1>{marketQuestion(market, match)}</h1>
 
           <div className="outcome-stack">
-            <OutcomeRow label={primaryLabel} logoUrl={match.homeLogoUrl} percent={yesPercent} teamCode={match.homeCode} />
+            <OutcomeRow label={primaryOutcome.label} logoUrl={primaryOutcome.logoUrl} percent={yesPercent} teamCode={primaryOutcome.code} />
             <OutcomeRow
-              label={secondaryLabel}
-              logoUrl={match.awayLogoUrl}
+              label={secondaryOutcome.label}
+              logoUrl={secondaryOutcome.logoUrl}
               percent={noPercent}
-              teamCode={match.awayCode}
+              teamCode={secondaryOutcome.code}
               tone="secondary"
             />
           </div>
@@ -633,9 +634,9 @@ function FeaturedMarket({
 
         <PositionShareChart
           activity={activity}
-          noLabel={secondaryLabel}
+          noLabel={secondaryOutcome.label}
           noPercent={noPercent}
-          yesLabel={primaryLabel}
+          yesLabel={primaryOutcome.label}
           yesPercent={yesPercent}
         />
       </div>
@@ -746,18 +747,18 @@ function PositionShareChart({
 }
 
 function OddsStrip({ odds }: { odds: MatchSnapshot["odds"] }) {
-  const visibleOdds = (odds ?? []).slice(0, 3);
+  const visibleOdds = resultOdds(odds ?? []);
   return (
     <div className="stableprice-strip">
-      <div>
-        <span>StablePrice odds</span>
-        <strong>{visibleOdds.length ? "TXODDS consensus" : "Waiting for odds"}</strong>
+      <div className="odds-brand">
+        <span>odds by</span>
+        <img alt="TxODDS" src={txoddsLogo} />
       </div>
       {visibleOdds.length ? (
-        <div className="odds-pill-list">
+        <div className="result-odds-grid">
           {visibleOdds.map((odd) => (
-            <span className="odds-pill" key={odd.id}>
-              <small>{cleanMarketLabel(odd.market)}</small>
+            <span className="result-odd" key={odd.id}>
+              <small>{odd.shortLabel || shortOddsLabel(odd)}</small>
               <strong>{odd.selection}</strong>
               <em>{formatOdd(odd)}</em>
             </span>
@@ -840,14 +841,16 @@ function MarketCard({
 }
 
 function MarketCardOdds({ odds }: { odds: MatchSnapshot["odds"] }) {
-  const firstOdd = odds?.[0];
+  const firstOdd = resultOdds(odds ?? [])[0];
   if (!firstOdd) {
     return <div className="mini-odds is-empty">StablePrice odds pending</div>;
   }
   return (
     <div className="mini-odds">
       <span>TXODDS</span>
-      <strong>{cleanMarketLabel(firstOdd.market)}</strong>
+      <strong>
+        {firstOdd.shortLabel ? `${firstOdd.shortLabel} ${firstOdd.selection}` : firstOdd.selection}
+      </strong>
       <em>{formatOdd(firstOdd)}</em>
     </div>
   );
@@ -1534,10 +1537,21 @@ function lineupY(index: number): number {
   return [50, 24, 76, 38, 62, 14, 86, 30, 70, 45, 55][index % 11];
 }
 
-function outcomeLabels(market: MarketDefinition, match: MatchSnapshot): [string, string] {
-  if (market.id === "home-win") return [match.home, match.away];
-  if (market.id === "away-win") return [match.away, match.home];
-  return ["Yes", "No"];
+interface OutcomeDisplay {
+  code: string;
+  label: string;
+  logoUrl?: string;
+}
+
+function outcomeRows(market: MarketDefinition, match: MatchSnapshot): [OutcomeDisplay, OutcomeDisplay] {
+  const home = { code: match.homeCode, label: match.home, logoUrl: match.homeLogoUrl };
+  const away = { code: match.awayCode, label: match.away, logoUrl: match.awayLogoUrl };
+  if (market.id === "home-win") return [home, away];
+  if (market.id === "away-win") return [away, home];
+  return [
+    { ...home, label: "Yes" },
+    { ...away, label: "No" },
+  ];
 }
 
 function chartY(percent: number): number {
@@ -1595,6 +1609,24 @@ function cleanMarketLabel(value: string): string {
     .replace(/\s+/g, " ")
     .trim()
     .replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Market";
+}
+
+function resultOdds(odds: NonNullable<MatchSnapshot["odds"]>): NonNullable<MatchSnapshot["odds"]> {
+  const resultMarket = odds
+    .filter((odd) => {
+      const market = odd.market.toLowerCase();
+      return market.includes("1x2") || market.includes("participant result") || market.includes("result");
+    })
+    .filter((odd) => odd.selectionRole === "home" || odd.selectionRole === "draw" || odd.selectionRole === "away");
+  const displayOdds = resultMarket.length >= 3 ? resultMarket : odds;
+  return [...displayOdds].sort((a, b) => (a.sortOrder ?? 3) - (b.sortOrder ?? 3)).slice(0, 3);
+}
+
+function shortOddsLabel(odd: NonNullable<MatchSnapshot["odds"]>[number]): string {
+  if (odd.selectionRole === "home") return "1";
+  if (odd.selectionRole === "draw") return "X";
+  if (odd.selectionRole === "away") return "2";
+  return "";
 }
 
 function numericStat(value: string): number {

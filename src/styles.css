@@ -512,27 +512,31 @@ p {
   border-radius: 12px;
   display: grid;
   gap: 12px;
-  grid-template-columns: 150px minmax(0, 1fr);
+  grid-template-columns: 112px minmax(0, 1fr);
   margin: -4px 0 22px;
-  padding: 12px;
+  padding: 10px 12px;
 }
 
-.stableprice-strip > div:first-child span,
-.stableprice-strip > div:first-child strong {
-  display: block;
+.odds-brand {
+  align-items: flex-start;
+  display: grid;
+  gap: 4px;
 }
 
-.stableprice-strip > div:first-child span {
+.odds-brand span {
   color: var(--muted);
-  font-size: 11px;
-  font-weight: 820;
-  margin-bottom: 3px;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
 }
 
-.stableprice-strip > div:first-child strong {
-  font-size: 13px;
-  line-height: 1.2;
+.odds-brand img {
+  display: block;
+  height: 17px;
+  object-fit: contain;
+  object-position: left center;
+  width: 82px;
 }
 
 .stableprice-strip p {
@@ -542,46 +546,48 @@ p {
   margin: 0;
 }
 
-.odds-pill-list {
-  display: flex;
-  flex-wrap: wrap;
+.result-odds-grid {
+  display: grid;
   gap: 8px;
-  justify-content: flex-end;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   min-width: 0;
 }
 
-.odds-pill {
+.result-odd {
+  align-items: center;
   background: #fff;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 8px;
   display: grid;
-  gap: 2px;
-  min-width: 112px;
-  padding: 8px 10px;
+  gap: 3px;
+  grid-template-columns: 20px minmax(0, 1fr);
+  min-height: 48px;
+  padding: 7px 9px;
 }
 
-.odds-pill small {
+.result-odd small {
   color: var(--muted);
-  font-size: 10px;
-  font-weight: 820;
+  font-size: 12px;
+  font-weight: 660;
+  grid-row: span 2;
+  line-height: 1;
+  text-align: center;
+}
+
+.result-odd strong {
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.1;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-transform: uppercase;
   white-space: nowrap;
 }
 
-.odds-pill strong {
-  font-size: 13px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.odds-pill em {
+.result-odd em {
   color: var(--accent-dark);
-  font-size: 14px;
+  font-size: 13px;
   font-style: normal;
-  font-weight: 850;
+  font-weight: 760;
 }
 
 .team-avatar {
@@ -2074,6 +2080,10 @@ p {
 
   .account-layout {
     padding: 0 10px;
+  }
+
+  .result-odds-grid {
+    grid-template-columns: 1fr;
   }
 
   .card-modal-backdrop {

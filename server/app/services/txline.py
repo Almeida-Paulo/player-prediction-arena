@@ -130,8 +130,8 @@ async def hydrate_odds_snapshots(
         if not fixture_id:
             continue
         odds_items = await fetch_odds_snapshot(client, base, settings, guest_jwt, fixture_id)
-        mapped_odds = [mapped for item in odds_items for mapped in map_txline_odds(item)]
-        match["odds"] = mapped_odds[:24]
+        mapped_odds = [mapped for item in odds_items for mapped in map_txline_odds(item, match)]
+        match["odds"] = sorted(mapped_odds, key=odds_sort_key)[:24]
 
 
 def map_txline_fixture(item: dict[str, Any]) -> dict[str, Any] | None:
@@ -153,6 +153,9 @@ def map_txline_fixture(item: dict[str, Any]) -> dict[str, Any] | None:
         "away": away,
         "homeCode": team_code(home),
         "awayCode": team_code(away),
+        "txlineParticipant1": participant_1,
+        "txlineParticipant2": participant_2,
+        "txlineParticipant1IsHome": participant_1_is_home,
         "homeLogoUrl": first_value(item, "HomeLogoUrl", "homeLogoUrl", "HomeBadge", "homeBadge"),
         "awayLogoUrl": first_value(item, "AwayLogoUrl", "awayLogoUrl", "AwayBadge", "awayBadge"),
         "competition": first_value(item, "Competition", "competition", "CompetitionName", "competitionName", "Country"),
@@ -174,7 +177,7 @@ def map_txline_fixture(item: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def map_txline_odds(item: dict[str, Any]) -> list[dict[str, Any]]:
+def map_txline_odds(item: dict[str, Any], match: dict[str, Any]) -> list[dict[str, Any]]:
     market = str(
         first_value(
             item,
@@ -215,20 +218,23 @@ def map_txline_odds(item: dict[str, Any]) -> list[dict[str, Any]]:
         )
         entries: list[dict[str, Any]] = []
         for index in range(entry_count):
-            selection = str(list_value(price_names, index) or scalar_selection or f"Selection {index + 1}")
+            selection_meta = normalize_txline_price_name(list_value(price_names, index) or scalar_selection, match)
             decimal = normalize_decimal_price(list_value(prices, index))
             implied = parse_probability(list_value(pcts, index))
-            if not any([market, selection, decimal, implied]):
+            if not any([market, selection_meta["selection"], decimal, implied]):
                 continue
             odds_id = str(
                 first_value(item, "Id", "id", "OddsId", "oddsId", "MarketId", "marketId", "MessageId", "messageId")
-                or f"{market}:{selection}:{index}"
+                or f"{market}:{selection_meta['selection']}:{index}"
             )
             entries.append(
                 {
                     "id": f"{odds_id}:{index}",
                     "market": market or "Market",
-                    "selection": selection,
+                    "selection": selection_meta["selection"],
+                    "shortLabel": selection_meta["shortLabel"],
+                    "selectionRole": selection_meta["selectionRole"],
+                    "sortOrder": selection_meta["sortOrder"],
                     "decimal": decimal,
                     "impliedProbability": implied,
                     "status": first_value(item, "Status", "status", "Suspended", "suspended", "GameState", "gameState"),
@@ -239,6 +245,7 @@ def map_txline_odds(item: dict[str, Any]) -> list[dict[str, Any]]:
         return entries
 
     selection = scalar_selection
+    selection_meta = normalize_txline_price_name(selection, match)
     decimal = safe_float(
         first_value(
             item,
@@ -277,7 +284,10 @@ def map_txline_odds(item: dict[str, Any]) -> list[dict[str, Any]]:
         {
             "id": odds_id,
             "market": market or "Market",
-            "selection": selection or "Selection",
+            "selection": selection_meta["selection"] or "Selection",
+            "shortLabel": selection_meta["shortLabel"],
+            "selectionRole": selection_meta["selectionRole"],
+            "sortOrder": selection_meta["sortOrder"],
             "decimal": decimal,
             "american": american,
             "impliedProbability": implied,
@@ -286,6 +296,40 @@ def map_txline_odds(item: dict[str, Any]) -> list[dict[str, Any]]:
             "source": "txline",
         }
     ]
+
+
+def normalize_txline_price_name(value: Any, match: dict[str, Any]) -> dict[str, Any]:
+    raw = str(value or "").strip()
+    key = raw.lower().replace(" ", "").replace("_", "").replace("-", "")
+    participant1_is_home = bool(match.get("txlineParticipant1IsHome", True))
+    home = str(match.get("home") or "Home")
+    away = str(match.get("away") or "Away")
+
+    if key in {"draw", "x", "tie"}:
+        return {"selection": "Draw", "shortLabel": "X", "selectionRole": "draw", "sortOrder": 1}
+    if key in {"part1", "participant1", "p1", "1"}:
+        return (
+            {"selection": home, "shortLabel": "1", "selectionRole": "home", "sortOrder": 0}
+            if participant1_is_home
+            else {"selection": away, "shortLabel": "2", "selectionRole": "away", "sortOrder": 2}
+        )
+    if key in {"part2", "participant2", "p2", "2"}:
+        return (
+            {"selection": away, "shortLabel": "2", "selectionRole": "away", "sortOrder": 2}
+            if participant1_is_home
+            else {"selection": home, "shortLabel": "1", "selectionRole": "home", "sortOrder": 0}
+        )
+    if key in {"home", "hometeam"} or raw == home:
+        return {"selection": home, "shortLabel": "1", "selectionRole": "home", "sortOrder": 0}
+    if key in {"away", "awayteam"} or raw == away:
+        return {"selection": away, "shortLabel": "2", "selectionRole": "away", "sortOrder": 2}
+    return {"selection": raw or "Selection", "shortLabel": "", "selectionRole": "other", "sortOrder": 3}
+
+
+def odds_sort_key(item: dict[str, Any]) -> tuple[int, int, str]:
+    market = str(item.get("market") or "").lower()
+    is_result = "1x2" in market or "participant result" in market or "result" in market
+    return (0 if is_result else 1, safe_int(item.get("sortOrder", 3)), str(item.get("selection") or ""))
 
 
 def first_value(item: dict[str, Any], *keys: str) -> Any:

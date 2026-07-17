@@ -84,6 +84,9 @@ export interface TxLineOddsEntry {
   id: string;
   market: string;
   selection: string;
+  shortLabel?: string;
+  selectionRole?: "home" | "draw" | "away" | "other";
+  sortOrder?: number;
   decimal?: number;
   american?: number;
   impliedProbability?: number;
