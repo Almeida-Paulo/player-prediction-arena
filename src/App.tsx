@@ -241,9 +241,10 @@ export function App() {
     selectMatch(matches[nextIndex].id);
   }
 
-  function placePrediction() {
+  function placePrediction(targetMarketId = selectedMarket?.id) {
     if (!state.connected) return showToast("Login before placing predictions.");
-    if (!selectedMatch || !selectedMarket) return showToast("Select an available World Cup market.");
+    const targetMarket = markets.find((market) => market.id === targetMarketId) ?? selectedMarket;
+    if (!selectedMatch || !targetMarket) return showToast("Select an available World Cup market.");
     if (stake <= 0) return showToast("Stake must be greater than zero.");
     if (stake > state.progress.balanceCents) return showToast("Insufficient balance.");
 
@@ -262,22 +263,23 @@ export function App() {
     }
 
     const context = {
-      team: selectedMatch.home,
-      player: selectedMarket.id === "mom-home-team" ? selectedMatch.mom : topRatedPlayer(selectedMatch),
+      team: marketTeam(selectedMatch, targetMarket),
+      player: targetMarket.id === "mom-home-team" ? selectedMatch.mom : topRatedPlayer(selectedMatch),
     };
     const position: PositionInput = {
       id: crypto.randomUUID(),
       matchId: selectedMatch.id,
-      marketId: selectedMarket.id,
-      marketLabel: selectedMarket.label,
+      marketId: targetMarket.id,
+      marketLabel: targetMarket.label,
       stakeCents: stake,
-      oddsBps: selectedMarket.oddsBps,
+      oddsBps: targetMarket.oddsBps,
       context,
       cardIds: selectedCards.map((card) => card.id),
     };
 
     setState((current) => ({
       ...current,
+      selectedMarketId: targetMarket.id,
       progress: {
         ...current.progress,
         balanceCents: current.progress.balanceCents - stake,
@@ -437,7 +439,6 @@ export function App() {
                 onPlacePrediction={placePrediction}
                 onPreviousMatch={() => selectAdjacentMatch(-1)}
                 onSettle={settleMatch}
-                onShowToast={showToast}
               />
             ) : (
               <div className="empty-state tall">
@@ -550,7 +551,6 @@ function FeaturedMarket({
   onPlacePrediction,
   onPreviousMatch,
   onSettle,
-  onShowToast,
 }: {
   activity: MarketActivity;
   market: MarketDefinition;
@@ -565,13 +565,13 @@ function FeaturedMarket({
   onChangeStake: (value: number) => void;
   onNextMatch: () => void;
   onOpenCardPicker: () => void;
-  onPlacePrediction: () => void;
+  onPlacePrediction: (targetMarketId?: string) => void;
   onPreviousMatch: () => void;
   onSettle: () => void;
-  onShowToast: (message: string) => void;
 }) {
   const [yesPercent, noPercent] = currentOutcomePercents(activity, market.oddsBps);
   const [primaryOutcome, secondaryOutcome] = outcomeRows(market, match);
+  const secondaryMarketId = oppositeResultMarketId(market.id);
   const selectedCardLabel = selectedCards.length
     ? selectedCards.map((card) => card.name).join(", ")
     : "No cards selected";
@@ -619,13 +619,21 @@ function FeaturedMarket({
           <h1>{marketQuestion(market, match)}</h1>
 
           <div className="outcome-stack">
-            <OutcomeRow label={primaryOutcome.label} logoUrl={primaryOutcome.logoUrl} percent={yesPercent} teamCode={primaryOutcome.code} />
             <OutcomeRow
+              actionLabel={formatPercentCents(yesPercent)}
+              label={primaryOutcome.label}
+              logoUrl={primaryOutcome.logoUrl}
+              teamCode={primaryOutcome.code}
+              onAction={() => onPlacePrediction(market.id)}
+            />
+            <OutcomeRow
+              actionLabel={formatPercentCents(noPercent)}
+              disabled={!secondaryMarketId}
               label={secondaryOutcome.label}
               logoUrl={secondaryOutcome.logoUrl}
-              percent={noPercent}
               teamCode={secondaryOutcome.code}
               tone="secondary"
+              onAction={() => secondaryMarketId && onPlacePrediction(secondaryMarketId)}
             />
           </div>
 
@@ -675,12 +683,6 @@ function FeaturedMarket({
         </div>
 
         <div className="trade-actions">
-          <button className="yes-button" type="button" onClick={onPlacePrediction}>
-            Yes {formatPercentCents(yesPercent)}
-          </button>
-          <button className="no-button" type="button" onClick={() => onShowToast("No-side settlement will be wired next.")}>
-            No {formatPercentCents(noPercent)}
-          </button>
           <button className="settle-button" type="button" onClick={onSettle}>
             <ShieldCheck size={17} />
             Settle
@@ -715,13 +717,6 @@ function PositionShareChart({
 
   return (
     <div className="position-chart-card">
-      <div className="chart-heading">
-        <div>
-          <span>Prediction Arena market</span>
-          <strong>{Math.round(yesPercent)}%</strong>
-        </div>
-        <small>{activity.positions.toLocaleString("en-US")} platform positions</small>
-      </div>
       <svg className="line-chart" role="img" viewBox="0 0 340 176" aria-label="Platform probability history">
         {yTicks.map((tick) => {
           const y = chartY(tick, maxPercent);
@@ -758,7 +753,6 @@ function PositionShareChart({
         </span>
         <strong>{noPercent.toFixed(1)}%</strong>
       </div>
-      <p className="chart-note">Last 13 platform market updates.</p>
     </div>
   );
 }
@@ -789,23 +783,34 @@ function OddsStrip({ odds }: { odds: MatchSnapshot["odds"] }) {
 }
 
 function OutcomeRow({
+  actionLabel,
+  disabled,
   label,
   logoUrl,
-  percent,
   teamCode,
   tone = "primary",
+  onAction,
 }: {
+  actionLabel: string;
+  disabled?: boolean;
   label: string;
   logoUrl?: string;
-  percent: number;
   teamCode: string;
   tone?: "primary" | "secondary";
+  onAction: () => void;
 }) {
   return (
     <div className={`outcome-row ${tone}`}>
       <TeamAvatar code={teamCode} logoUrl={logoUrl} />
       <strong>{label}</strong>
-      <span>{Math.round(percent)}%</span>
+      <button
+        className={`outcome-button ${tone === "primary" ? "yes-button" : "no-button"}`}
+        disabled={disabled}
+        type="button"
+        onClick={onAction}
+      >
+        {actionLabel}
+      </button>
     </div>
   );
 }
@@ -1638,6 +1643,17 @@ function outcomeRows(market: MarketDefinition, match: MatchSnapshot): [OutcomeDi
     { ...home, label: "Yes" },
     { ...away, label: "No" },
   ];
+}
+
+function marketTeam(match: MatchSnapshot, market: MarketDefinition): string {
+  if (market.id === "away-win") return match.away;
+  return match.home;
+}
+
+function oppositeResultMarketId(marketId: string): string | undefined {
+  if (marketId === "home-win") return "away-win";
+  if (marketId === "away-win") return "home-win";
+  return undefined;
 }
 
 const chartLeft = 12;

@@ -498,10 +498,11 @@ p {
   white-space: nowrap;
 }
 
-.outcome-row span {
-  font-size: 21px;
-  font-weight: 820;
-  text-align: right;
+.outcome-button {
+  justify-self: end;
+  min-height: 36px;
+  min-width: 76px;
+  padding: 0 14px;
 }
 
 .stableprice-strip {
@@ -894,15 +895,21 @@ p {
 .trade-actions {
   display: grid;
   gap: 12px;
-  grid-template-columns: 1fr 1fr auto;
+  grid-template-columns: 1fr;
 }
 
 .yes-button,
 .no-button {
   border: 0;
   border-radius: 8px;
-  font-weight: 850;
+  font-size: 15px;
+  font-weight: 820;
   min-height: 44px;
+}
+
+.outcome-button.yes-button,
+.outcome-button.no-button {
+  min-height: 36px;
 }
 
 .yes-button {
@@ -913,6 +920,11 @@ p {
 .no-button {
   background: #ffeded;
   color: #d14343;
+}
+
+.outcome-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .settle-button {
