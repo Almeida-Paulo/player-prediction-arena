@@ -90,7 +90,7 @@ export interface MatchSnapshot {
   awayLogoUrl?: string;
   competition?: string;
   round?: string;
-  startTime?: string;
+  startTime?: string | number;
   minute: string;
   status: "SCHEDULED" | "LIVE" | "FINAL";
   score: Record<string, number>;

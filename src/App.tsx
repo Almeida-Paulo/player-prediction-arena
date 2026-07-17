@@ -1,28 +1,36 @@
 import {
   BadgeCheck,
   BarChart3,
+  Bookmark,
+  ChevronDown,
   CircleDollarSign,
   Clock3,
-  Layers3,
+  Gift,
+  HelpCircle,
+  History,
+  LifeBuoy,
+  Link2,
   LockKeyhole,
+  Medal,
   PackageOpen,
+  Search,
   ShieldCheck,
-  Sparkles,
   Trophy,
-  Wallet,
-  Zap,
+  TrendingUp,
+  User,
+  Users,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { cards as cardCatalog, starterPackPool } from "../shared/cards";
+import predictionLogo from "../assets/Prediction-Arena-logo.png";
 import { skillBadges } from "../shared/badges";
+import { cards as cardCatalog, starterPackPool } from "../shared/cards";
 import { markets as marketCatalog } from "../shared/demo-data";
 import { teamStats, topRatedPlayer } from "../shared/settlement";
 import type {
   CardDefinition,
   CardType,
   MarketDefinition,
-  MatchEvent,
   MatchSnapshot,
   PositionInput,
   SettledPosition,
@@ -41,6 +49,20 @@ interface AppState {
   selectedMatchId: string;
   selectedMarketId: string;
   toast: string;
+}
+
+type AccountView = "home" | "profile" | "rewards" | "leaderboard" | "help";
+
+interface MarketItem {
+  match: MatchSnapshot;
+  market: MarketDefinition;
+}
+
+interface MarketActivity {
+  volumeCents: number;
+  positions: number;
+  bettors: number;
+  wonCents: number;
 }
 
 const STORAGE_KEY = "player-prediction-arena-ts";
@@ -68,6 +90,8 @@ const initialState: AppState = {
   toast: "",
 };
 
+const categories = ["World Cup", "Crypto", "Politics", "Finance", "Culture", "Technology", "Climate"];
+
 export function App() {
   const [matches, setMatches] = useState<MatchSnapshot[]>([]);
   const [markets, setMarkets] = useState<MarketDefinition[]>(marketCatalog);
@@ -79,6 +103,8 @@ export function App() {
   const [historicCardId, setHistoricCardId] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [activeView, setActiveView] = useState<AccountView>("home");
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -92,10 +118,18 @@ export function App() {
         setAllCards(catalog.cards);
         setMarkets(catalog.markets);
         setMatches(loadedMatches);
-        setState((current) => ({
-          ...current,
-          selectedMatchId: current.selectedMatchId || loadedMatches[0]?.id || "",
-        }));
+        setState((current) => {
+          const preferred = pickLaunchMatch(loadedMatches);
+          const currentMatchStillExists = loadedMatches.some((match) => match.id === current.selectedMatchId);
+          return {
+            ...current,
+            selectedMatchId: currentMatchStillExists ? current.selectedMatchId : preferred?.id ?? "",
+            selectedMarketId:
+              catalog.markets.some((market) => market.id === current.selectedMarketId)
+                ? current.selectedMarketId
+                : catalog.markets[0]?.id ?? "home-win",
+          };
+        });
       } catch (error) {
         if (!active) return;
         setLoadError(error instanceof Error ? error.message : "Unable to load real match feed.");
@@ -124,6 +158,11 @@ export function App() {
     [markets, state.selectedMarketId],
   );
 
+  const marketItems = useMemo<MarketItem[]>(
+    () => matches.flatMap((match) => markets.map((market) => ({ match, market }))),
+    [matches, markets],
+  );
+
   const selectedCards = useMemo(
     () =>
       [momentCardId, powerCardId, historicCardId]
@@ -146,10 +185,22 @@ export function App() {
   const potentialProfit = Math.max(0, potentialGross - stake);
   const maxBonusBps = selectedCards.reduce((sum, card) => sum + card.bonusBps, 0);
   const maxBonus = Math.floor((potentialProfit * maxBonusBps) / 10000);
+  const featuredActivity =
+    selectedMatch && selectedMarket ? getMarketActivity(state, selectedMatch.id, selectedMarket.id) : emptyActivity();
+  const trendingItems = useMemo(() => rankTrendingMarkets(marketItems, state).slice(0, 3), [marketItems, state]);
+  const highestVolumeItems = useMemo(() => rankVolumeMarkets(marketItems, state).slice(0, 3), [marketItems, state]);
 
   function connectWallet() {
-    setState((current) => ({ ...current, connected: !current.connected }));
-    showToast(state.connected ? "Wallet disconnected." : "Wallet connected for this hackathon session.");
+    setState((current) => ({ ...current, connected: true }));
+    setActiveView("home");
+    showToast("Session connected. Account features are available.");
+  }
+
+  function disconnectWallet() {
+    setState((current) => ({ ...current, connected: false }));
+    setActiveView("home");
+    setUserMenuOpen(false);
+    showToast("Session disconnected.");
   }
 
   function selectMatch(matchId: string) {
@@ -157,10 +208,20 @@ export function App() {
     setMomentCardId("");
     setPowerCardId("");
     setHistoricCardId("");
+    setActiveView("home");
+  }
+
+  function selectMarket(matchId: string, marketId: string) {
+    setState((current) => ({ ...current, selectedMatchId: matchId, selectedMarketId: marketId }));
+    setMomentCardId("");
+    setPowerCardId("");
+    setHistoricCardId("");
+    setActiveView("home");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function placePrediction() {
-    if (!state.connected) return showToast("Connect a wallet before placing predictions.");
+    if (!state.connected) return showToast("Login before placing predictions.");
     if (!selectedMatch || !selectedMarket) return showToast("Select an available World Cup market.");
     if (stake <= 0) return showToast("Stake must be greater than zero.");
     if (stake > state.progress.balanceCents) return showToast("Insufficient balance.");
@@ -274,310 +335,714 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <header className="topbar">
-        <div className="brand-lockup">
-          <span className="brand-mark">PPA</span>
-          <div>
-            <p className="eyebrow">World Cup prediction market</p>
-            <h1>Player Prediction Arena</h1>
-          </div>
-        </div>
-        <div className="top-actions">
-          <Metric label="Feed" value={selectedMatch?.source === "txline" ? "TXLine" : selectedMatch?.source ?? "Waiting"} />
-          {state.connected && <Metric label="Balance" value={formatCents(state.progress.balanceCents)} />}
-          <button className="primary-button" type="button" onClick={connectWallet}>
-            <Wallet size={18} />
-            {state.connected ? "0x7A...91F" : "Connect Wallet"}
+      <header className="site-header">
+        <div className="header-main">
+          <button className="brand-lockup" type="button" onClick={() => setActiveView("home")}>
+            <img alt="" className="brand-logo" src={predictionLogo} />
+            <span>Prediction Arena</span>
           </button>
+
+          <label className="search-box">
+            <Search size={20} />
+            <input placeholder="Search markets, teams..." type="search" />
+          </label>
+
+          {state.connected ? (
+            <div className="user-menu-wrap">
+              <button
+                aria-expanded={userMenuOpen}
+                className="user-button"
+                type="button"
+                onClick={() => setUserMenuOpen((value) => !value)}
+              >
+                <User size={20} />
+                <ChevronDown size={16} />
+              </button>
+              {userMenuOpen && (
+                <div className="user-dropdown">
+                  <MenuItem icon={<User />} label="Profile" onClick={() => openAccountView("profile")} />
+                  <MenuItem icon={<Gift />} label="Rewards" onClick={() => openAccountView("rewards")} />
+                  <MenuItem icon={<Medal />} label="Leaderboard" onClick={() => openAccountView("leaderboard")} />
+                  <MenuItem icon={<HelpCircle />} label="Help" onClick={() => openAccountView("help")} />
+                  <button className="menu-row danger" type="button" onClick={disconnectWallet}>
+                    <LockKeyhole size={17} />
+                    Disconnect
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="auth-actions">
+              <button className="login-button" type="button" onClick={connectWallet}>
+                Login
+              </button>
+              <button className="signup-button" type="button" onClick={connectWallet}>
+                Sign up
+              </button>
+            </div>
+          )}
         </div>
+
+        <nav className="category-nav" aria-label="Prediction categories">
+          {categories.map((category) => (
+            <button className={category === "World Cup" ? "is-active" : ""} key={category} type="button">
+              {category === "World Cup" && <Trophy size={17} />}
+              {category}
+            </button>
+          ))}
+        </nav>
       </header>
 
       {loadError && <FeedNotice message={loadError} />}
 
-      <main className="market-layout">
-        <section className="market-main" aria-label="World Cup markets">
-          <div className="fixture-strip">
-            <div className="fixture-strip-header">
-              <strong>World Cup</strong>
-              <span>{isLoading ? "Loading fixtures" : `${matches.length} fixtures`}</span>
-            </div>
-            <div className="fixture-tabs" aria-label="Fixtures">
-              {matches.map((match) => (
-                <button
-                  className={`fixture-tab ${match.id === selectedMatch?.id ? "is-selected" : ""}`}
-                  key={match.id}
-                  type="button"
-                  onClick={() => selectMatch(match.id)}
-                >
-                  <span>{match.status}</span>
-                  <strong>
-                    {match.homeCode} {match.score[match.home] ?? 0} - {match.score[match.away] ?? 0} {match.awayCode}
-                  </strong>
-                  <small>{match.status === "SCHEDULED" ? formatStart(match.startTime) : match.minute}</small>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {selectedMatch && selectedMarket ? (
-            <section className="market-detail-card">
-              <div className="market-detail-top">
-                <div>
-                  <div className="market-kicker">
-                    <span>{selectedMatch.competition ?? "World Cup"}</span>
-                    <span>{selectedMatch.status}</span>
-                    <span>{formatStart(selectedMatch.startTime)}</span>
-                  </div>
-                  <h2>{marketQuestion(selectedMarket, selectedMatch)}</h2>
-                  <div className="market-meta-row">
-                    <TeamIdentity code={selectedMatch.homeCode} logoUrl={selectedMatch.homeLogoUrl} name={selectedMatch.home} />
-                    <span className="match-versus">
-                      {selectedMatch.score[selectedMatch.home] ?? 0}:{selectedMatch.score[selectedMatch.away] ?? 0}
-                    </span>
-                    <TeamIdentity alignRight code={selectedMatch.awayCode} logoUrl={selectedMatch.awayLogoUrl} name={selectedMatch.away} />
-                  </div>
-                </div>
-                <div className="market-price-card">
-                  <span>Chance</span>
-                  <strong>{formatProbability(selectedMarket.oddsBps)}</strong>
-                  <small>{formatDecimal(selectedMarket.oddsBps)}x payout</small>
-                </div>
-              </div>
-
-              <div className="market-action-row">
-                <button className="yes-button" type="button" onClick={placePrediction}>
-                  Yes {formatProbability(selectedMarket.oddsBps)}
-                </button>
-                <button className="no-button" type="button">
-                  No {formatNoProbability(selectedMarket.oddsBps)}
-                </button>
-              </div>
-
-              <LineupPitch match={selectedMatch} />
-
-              <div className="market-lower-grid">
-                <div className="stats-strip">
-                  <StatComparison
-                    label="Possession"
-                    left={homeStats ? `${homeStats.possession}%` : "N/A"}
-                    right={awayStats ? `${awayStats.possession}%` : "N/A"}
-                  />
-                  <StatComparison
-                    label="Shots faced"
-                    left={homeStats ? String(homeStats.shotsAgainst) : "N/A"}
-                    right={awayStats ? String(awayStats.shotsAgainst) : "N/A"}
-                  />
-                  <StatComparison
-                    label="Corners faced"
-                    left={homeStats ? String(homeStats.cornersAgainst) : "N/A"}
-                    right={awayStats ? String(awayStats.cornersAgainst) : "N/A"}
-                  />
-                </div>
-                <div className="event-panel">
-                  <div className="section-heading compact">
-                    <h3>Timeline</h3>
-                    <span className="source-pill">{selectedMatch.source}</span>
-                  </div>
-                  <EventList events={selectedMatch.events} />
-                </div>
-              </div>
-            </section>
-          ) : (
-            <div className="empty-state tall">
-              <Clock3 />
-              <strong>Waiting for TXLine fixtures</strong>
-              <p>Once the backend receives real World Cup data, the market page will populate automatically.</p>
-            </div>
-          )}
-
-          {selectedMatch && (
-            <section className="markets-table-card">
-              <div className="section-heading">
-                <div>
-                  <h3>All markets</h3>
-                  <p className="muted">{selectedMatch.home} vs {selectedMatch.away}</p>
-                </div>
-                <span className="source-pill">TXLine</span>
-              </div>
-              <div className="market-table" role="list">
-                {markets.map((market) => (
-                  <button
-                    className={`market-table-row ${market.id === selectedMarket?.id ? "is-selected" : ""}`}
-                    key={market.id}
-                    type="button"
-                    onClick={() => setState((current) => ({ ...current, selectedMarketId: market.id }))}
-                  >
-                    <div>
-                      <span>{market.kind}</span>
-                      <strong>{marketQuestion(market, selectedMatch)}</strong>
-                    </div>
-                    <strong className="chance-cell">{formatProbability(market.oddsBps)}</strong>
-                    <span className="yes-cell">Yes {formatProbability(market.oddsBps)}</span>
-                    <span className="no-cell">No {formatNoProbability(market.oddsBps)}</span>
-                  </button>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {!matches.length && (
-            <div className="empty-state">
-              <ShieldCheck />
-              <strong>No real fixtures loaded</strong>
-              <p>Configure TXLine credentials on the server. The interface will not invent matches when the feed is unavailable.</p>
-            </div>
-          )}
-        </section>
-
-        <aside className="trade-sidebar" aria-label="Trade ticket and wallet">
-          <section className="trade-ticket">
-            <div className="section-heading compact">
-              <div>
-                <p className="eyebrow">Trade ticket</p>
-                <h2>{selectedMarket?.label ?? "Select a market"}</h2>
-              </div>
-              <Sparkles size={20} />
-            </div>
-
-            <label className="field">
-              <span>Stake</span>
-              <input
-                min={10}
-                step={10}
-                type="number"
-                value={stake / 100}
-                onChange={(event) => setStake(Math.max(0, Math.round(Number(event.target.value) * 100)))}
-              />
-            </label>
-
-            <div className="ticket-metrics">
-              <Metric label="Gross payout" value={formatCents(potentialGross)} />
-              <Metric label="Net profit" value={formatCents(potentialProfit)} />
-              <Metric label="Max card bonus" value={formatCents(maxBonus)} />
-            </div>
-
-            <div className="loadout-stack">
-              <CardSelect
+      {activeView === "home" ? (
+        <main className="arena-layout">
+          <section className="primary-column" aria-label="World Cup markets">
+            {selectedMatch && selectedMarket ? (
+              <FeaturedMarket
+                activity={featuredActivity}
+                awayStats={awayStats}
                 cards={allCards}
-                inventory={state.inventory}
-                label="Moment Card"
-                locked={lockedForMatch}
-                type="moment"
-                value={momentCardId}
-                onChange={setMomentCardId}
+                historicCardId={historicCardId}
+                homeStats={homeStats}
+                lockedForMatch={lockedForMatch}
+                market={selectedMarket}
+                match={selectedMatch}
+                maxBonus={maxBonus}
+                momentCardId={momentCardId}
+                ownedInventory={state.inventory}
+                potentialGross={potentialGross}
+                potentialProfit={potentialProfit}
+                powerCardId={powerCardId}
+                stake={stake}
+                onChangeHistoricCard={setHistoricCardId}
+                onChangeMomentCard={setMomentCardId}
+                onChangePowerCard={setPowerCardId}
+                onChangeStake={setStake}
+                onPlacePrediction={placePrediction}
+                onSettle={settleMatch}
+                onShowToast={showToast}
               />
-              <CardSelect
-                cards={allCards}
-                inventory={state.inventory}
-                label="Power Card"
-                locked={lockedForMatch}
-                type="power"
-                value={powerCardId}
-                onChange={setPowerCardId}
-              />
-              <CardSelect
-                cards={allCards}
-                inventory={state.inventory}
-                label="Historic Squad Card"
-                locked={lockedForMatch}
-                type="historic"
-                value={historicCardId}
-                onChange={setHistoricCardId}
-              />
-            </div>
-
-            <button className="primary-button full-width" type="button" onClick={placePrediction}>
-              <Zap size={18} />
-              Place Prediction
-            </button>
-          </section>
-
-          <section className="wallet-panel">
-            <div className="section-heading compact">
-              <h3>Wallet state</h3>
-              {state.connected ? <BadgeCheck size={20} /> : <LockKeyhole size={20} />}
-            </div>
-
-            {state.connected ? (
-              <>
-                <div className="wallet-metrics">
-                  <Metric icon={<CircleDollarSign />} label="Balance" value={formatCents(state.progress.balanceCents)} />
-                  <Metric icon={<Layers3 />} label="Predictions" value={`${state.progress.totalBets}/10`} />
-                  <Metric icon={<Trophy />} label="Best streak" value={String(state.progress.bestStreak)} />
-                </div>
-
-                <div className="pack-panel">
-                  <div>
-                    <p className="eyebrow">Starter pack</p>
-                    <strong>3 basic cards after 10 predictions</strong>
-                  </div>
-                  <button className="secondary-button" type="button" disabled={!packAvailable} onClick={openStarterPack}>
-                    <PackageOpen size={18} />
-                    Open
-                  </button>
-                </div>
-
-                <CardShelf cards={allCards} ownedCounts={ownedCounts} />
-              </>
             ) : (
-              <div className="empty-state">
-                <Wallet />
-                <strong>Connect to reveal cards</strong>
-                <p>Cards stay off-chain for this first release, but every card instance is tied to the prediction rules.</p>
+              <div className="empty-state tall">
+                <Clock3 />
+                <strong>Waiting for TXLine fixtures</strong>
+                <p>Once the backend receives real World Cup data, this market will populate automatically.</p>
               </div>
             )}
-          </section>
 
-          <section className="positions-panel">
-            <div className="section-heading compact">
-              <h3>Open predictions</h3>
-              <button className="secondary-button small" type="button" onClick={settleMatch}>
-                <ShieldCheck size={16} />
-                Settle
-              </button>
-            </div>
-            <PositionList positions={openPositions} />
-          </section>
-
-          <section className="badges-panel">
-            <div className="section-heading compact">
-              <h3>Skill Badges</h3>
-              <span className="count-pill">
-                {earnedBadges.length}/{skillBadges.length}
-              </span>
-            </div>
-            <div className="badge-list">
-              {skillBadges.slice(0, 4).map((badge) => (
-                <div className={`badge-item ${earnedBadges.includes(badge) ? "is-earned" : ""}`} key={badge.id}>
-                  <BadgeCheck size={18} />
-                  <div>
-                    <strong>{badge.name}</strong>
-                    <small>{badge.condition}</small>
-                  </div>
+            <section className="market-grid-section">
+              <SectionTitle
+                eyebrow={isLoading ? "Loading fixtures" : `${matches.length} fixtures`}
+                title="More World Cup predictions"
+              />
+              {marketItems.length ? (
+                <div className="prediction-grid">
+                  {marketItems.map((item) => (
+                    <MarketCard
+                      activity={getMarketActivity(state, item.match.id, item.market.id)}
+                      isSelected={item.match.id === selectedMatch?.id && item.market.id === selectedMarket?.id}
+                      item={item}
+                      key={`${item.match.id}-${item.market.id}`}
+                      onSelect={() => selectMarket(item.match.id, item.market.id)}
+                    />
+                  ))}
                 </div>
-              ))}
-            </div>
+              ) : (
+                <div className="empty-state">
+                  <ShieldCheck />
+                  <strong>No real fixtures loaded</strong>
+                  <p>Configure TXLine credentials on the server. The interface will not invent matches.</p>
+                </div>
+              )}
+            </section>
           </section>
-        </aside>
-      </main>
+
+          <aside className="insight-column" aria-label="Match insights">
+            {selectedMatch && <LineupPreview match={selectedMatch} />}
+            <MarketInsightPanel
+              emptyLabel="Activity appears after the first platform position."
+              items={trendingItems}
+              state={state}
+              title="Trending"
+              type="trending"
+              onSelect={(item) => selectMarket(item.match.id, item.market.id)}
+            />
+            <MarketInsightPanel
+              emptyLabel="Volume appears after users place predictions."
+              items={highestVolumeItems}
+              state={state}
+              title="Highest volume"
+              type="volume"
+              onSelect={(item) => selectMarket(item.match.id, item.market.id)}
+            />
+          </aside>
+        </main>
+      ) : (
+        <AccountScreen
+          activeView={activeView}
+          allCards={allCards}
+          earnedBadges={earnedBadges}
+          ownedCounts={ownedCounts}
+          packAvailable={packAvailable}
+          state={state}
+          onOpenPack={openStarterPack}
+          onSelectView={setActiveView}
+          onShowToast={showToast}
+        />
+      )}
 
       <div className={`toast ${state.toast ? "is-visible" : ""}`} role="status" aria-live="polite">
         {state.toast}
       </div>
     </div>
   );
+
+  function openAccountView(view: AccountView) {
+    setActiveView(view);
+    setUserMenuOpen(false);
+  }
 }
 
-function FeedNotice({ message }: { message: string }) {
+function FeaturedMarket({
+  activity,
+  awayStats,
+  cards,
+  historicCardId,
+  homeStats,
+  lockedForMatch,
+  market,
+  match,
+  maxBonus,
+  momentCardId,
+  ownedInventory,
+  potentialGross,
+  potentialProfit,
+  powerCardId,
+  stake,
+  onChangeHistoricCard,
+  onChangeMomentCard,
+  onChangePowerCard,
+  onChangeStake,
+  onPlacePrediction,
+  onSettle,
+  onShowToast,
+}: {
+  activity: MarketActivity;
+  awayStats: ReturnType<typeof teamStats> | null;
+  cards: CardDefinition[];
+  historicCardId: string;
+  homeStats: ReturnType<typeof teamStats> | null;
+  lockedForMatch: Set<string>;
+  market: MarketDefinition;
+  match: MatchSnapshot;
+  maxBonus: number;
+  momentCardId: string;
+  ownedInventory: string[];
+  potentialGross: number;
+  potentialProfit: number;
+  powerCardId: string;
+  stake: number;
+  onChangeHistoricCard: (value: string) => void;
+  onChangeMomentCard: (value: string) => void;
+  onChangePowerCard: (value: string) => void;
+  onChangeStake: (value: number) => void;
+  onPlacePrediction: () => void;
+  onSettle: () => void;
+  onShowToast: (message: string) => void;
+}) {
+  const yesPercent = impliedProbability(market.oddsBps);
+  const noPercent = 100 - yesPercent;
+  const [primaryLabel, secondaryLabel] = outcomeLabels(market, match);
+
   return (
-    <div className="feed-notice">
-      <ShieldCheck size={18} />
-      <span>{message}. Check TXLine guest JWT/API token and restart the FastAPI service.</span>
+    <section className="featured-market-card">
+      <div className="featured-toolbar">
+        <div className="market-type">
+          <span className="market-icon">
+            <Trophy size={22} />
+          </span>
+          <div>
+            <span>Football</span>
+            <strong>{match.competition ?? "World Cup"}</strong>
+          </div>
+        </div>
+        <div className="icon-actions">
+          <button aria-label="Copy market link" type="button">
+            <Link2 size={18} />
+          </button>
+          <button aria-label="Save market" type="button">
+            <Bookmark size={18} />
+          </button>
+        </div>
+      </div>
+
+      <div className="featured-content">
+        <div className="featured-copy">
+          <div className="market-status-row">
+            <span>{match.status}</span>
+            <span>{formatStart(match.startTime)}</span>
+            <span>{formatCents(activity.volumeCents)} vol</span>
+          </div>
+          <h1>{marketQuestion(market, match)}</h1>
+
+          <div className="outcome-stack">
+            <OutcomeRow label={primaryLabel} logoUrl={match.homeLogoUrl} percent={yesPercent} teamCode={match.homeCode} />
+            <OutcomeRow
+              label={secondaryLabel}
+              logoUrl={match.awayLogoUrl}
+              percent={noPercent}
+              teamCode={match.awayCode}
+              tone="secondary"
+            />
+          </div>
+
+          <div className="market-meta-grid">
+            <Metric icon={<Users />} label="Positions" value={String(activity.positions)} />
+            <Metric icon={<CircleDollarSign />} label="Volume" value={formatCents(activity.volumeCents)} />
+            <Metric icon={<BarChart3 />} label="Source" value={match.source.toUpperCase()} />
+          </div>
+        </div>
+
+        <PositionShareChart
+          activity={activity}
+          noLabel={secondaryLabel}
+          noPercent={noPercent}
+          yesLabel={primaryLabel}
+          yesPercent={yesPercent}
+        />
+      </div>
+
+      <div className="trade-panel">
+        <div className="trade-inputs">
+          <label className="field">
+            <span>Stake</span>
+            <input
+              min={10}
+              step={10}
+              type="number"
+              value={stake / 100}
+              onChange={(event) => onChangeStake(Math.max(0, Math.round(Number(event.target.value) * 100)))}
+            />
+          </label>
+          <div className="ticket-metrics">
+            <Metric label="Gross payout" value={formatCents(potentialGross)} />
+            <Metric label="Net profit" value={formatCents(potentialProfit)} />
+            <Metric label="Max card bonus" value={formatCents(maxBonus)} />
+          </div>
+        </div>
+
+        <div className="boost-selectors">
+          <CardSelect
+            cards={cards}
+            inventory={ownedInventory}
+            label="Moment"
+            locked={lockedForMatch}
+            type="moment"
+            value={momentCardId}
+            onChange={onChangeMomentCard}
+          />
+          <CardSelect
+            cards={cards}
+            inventory={ownedInventory}
+            label="Power"
+            locked={lockedForMatch}
+            type="power"
+            value={powerCardId}
+            onChange={onChangePowerCard}
+          />
+          <CardSelect
+            cards={cards}
+            inventory={ownedInventory}
+            label="Historic"
+            locked={lockedForMatch}
+            type="historic"
+            value={historicCardId}
+            onChange={onChangeHistoricCard}
+          />
+        </div>
+
+        <div className="trade-actions">
+          <button className="yes-button" type="button" onClick={onPlacePrediction}>
+            Yes {formatProbability(market.oddsBps)}
+          </button>
+          <button className="no-button" type="button" onClick={() => onShowToast("No-side settlement will be wired next.")}>
+            No {formatNoProbability(market.oddsBps)}
+          </button>
+          <button className="settle-button" type="button" onClick={onSettle}>
+            <ShieldCheck size={17} />
+            Settle
+          </button>
+        </div>
+      </div>
+
+      <div className="market-stat-band">
+        <StatComparison
+          label="Possession"
+          left={homeStats ? `${homeStats.possession}%` : "N/A"}
+          right={awayStats ? `${awayStats.possession}%` : "N/A"}
+        />
+        <StatComparison
+          label="Shots faced"
+          left={homeStats ? String(homeStats.shotsAgainst) : "N/A"}
+          right={awayStats ? String(awayStats.shotsAgainst) : "N/A"}
+        />
+        <StatComparison
+          label="Corners faced"
+          left={homeStats ? String(homeStats.cornersAgainst) : "N/A"}
+          right={awayStats ? String(awayStats.cornersAgainst) : "N/A"}
+        />
+      </div>
+    </section>
+  );
+}
+
+function PositionShareChart({
+  activity,
+  noLabel,
+  noPercent,
+  yesLabel,
+  yesPercent,
+}: {
+  activity: MarketActivity;
+  noLabel: string;
+  noPercent: number;
+  yesLabel: string;
+  yesPercent: number;
+}) {
+  return (
+    <div className="position-chart-card">
+      <div className="chart-heading">
+        <div>
+          <span>Position split</span>
+          <strong>{Math.round(yesPercent)}%</strong>
+        </div>
+        <small>{activity.positions ? `${activity.positions} platform positions` : "No positions yet"}</small>
+      </div>
+      <div className="position-bars" aria-label="Current position split">
+        <div className="position-bar yes" style={{ width: `${yesPercent}%` }} />
+        <div className="position-bar no" style={{ width: `${noPercent}%` }} />
+      </div>
+      <div className="chart-grid">
+        {[0, 25, 50, 75, 100].map((tick) => (
+          <span key={tick}>{tick}%</span>
+        ))}
+      </div>
+      <div className="legend-row">
+        <span>
+          <i className="dot yes" />
+          {yesLabel}
+        </span>
+        <strong>{yesPercent.toFixed(1)}%</strong>
+      </div>
+      <div className="legend-row">
+        <span>
+          <i className="dot no" />
+          {noLabel}
+        </span>
+        <strong>{noPercent.toFixed(1)}%</strong>
+      </div>
     </div>
   );
 }
 
-function TeamIdentity({
+function OutcomeRow({
+  label,
+  logoUrl,
+  percent,
+  teamCode,
+  tone = "primary",
+}: {
+  label: string;
+  logoUrl?: string;
+  percent: number;
+  teamCode: string;
+  tone?: "primary" | "secondary";
+}) {
+  return (
+    <div className={`outcome-row ${tone}`}>
+      <TeamAvatar code={teamCode} logoUrl={logoUrl} />
+      <strong>{label}</strong>
+      <span>{Math.round(percent)}%</span>
+    </div>
+  );
+}
+
+function MarketCard({
+  activity,
+  isSelected,
+  item,
+  onSelect,
+}: {
+  activity: MarketActivity;
+  isSelected: boolean;
+  item: MarketItem;
+  onSelect: () => void;
+}) {
+  const yesPercent = impliedProbability(item.market.oddsBps);
+  const noPercent = 100 - yesPercent;
+
+  return (
+    <button className={`prediction-card ${isSelected ? "is-selected" : ""}`} type="button" onClick={onSelect}>
+      <div className="card-title-row">
+        <TeamAvatar code={item.match.homeCode} logoUrl={item.match.homeLogoUrl} />
+        <div>
+          <span>{item.match.competition ?? "World Cup"}</span>
+          <strong>{marketQuestion(item.market, item.match)}</strong>
+        </div>
+      </div>
+      <div className="mini-outcomes">
+        <div>
+          <span>Yes</span>
+          <strong>{Math.round(yesPercent)}%</strong>
+          <em>Yes</em>
+        </div>
+        <div>
+          <span>No</span>
+          <strong>{Math.round(noPercent)}%</strong>
+          <em>No</em>
+        </div>
+      </div>
+      <div className="card-footer">
+        <span>{formatCents(activity.volumeCents)} vol.</span>
+        <div>
+          <Gift size={16} />
+          <Bookmark size={16} />
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function LineupPreview({ match }: { match: MatchSnapshot }) {
+  const homeLineup = match.lineups?.[match.home];
+  const awayLineup = match.lineups?.[match.away];
+  const hasLineups = Boolean(homeLineup?.starters.length || awayLineup?.starters.length);
+  const title = match.status === "SCHEDULED" ? "Expected lineups" : "Confirmed lineups";
+
+  return (
+    <section className="lineup-panel">
+      <div className="lineup-top">
+        <TeamCompact code={match.homeCode} logoUrl={match.homeLogoUrl} name={match.home} />
+        <TeamCompact alignRight code={match.awayCode} logoUrl={match.awayLogoUrl} name={match.away} />
+      </div>
+      <div className="lineup-subhead">
+        <span>{title}</span>
+        <strong>{formatStart(match.startTime)}</strong>
+      </div>
+      <div className={`pitch-surface ${hasLineups ? "has-lineups" : "is-empty"}`}>
+        {hasLineups ? (
+          <>
+            <LineupSide lineup={homeLineup} side="home" />
+            <LineupSide lineup={awayLineup} side="away" />
+          </>
+        ) : (
+          <div className="lineup-empty">
+            <BarChart3 />
+            <strong>Lineups feed pending</strong>
+            <p>Probable and confirmed XIs will appear here once a lineup provider is mapped to this fixture.</p>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function MarketInsightPanel({
+  emptyLabel,
+  items,
+  state,
+  title,
+  type,
+  onSelect,
+}: {
+  emptyLabel: string;
+  items: MarketItem[];
+  state: AppState;
+  title: string;
+  type: "trending" | "volume";
+  onSelect: (item: MarketItem) => void;
+}) {
+  const hasActivity = items.some((item) => getMarketActivity(state, item.match.id, item.market.id).positions > 0);
+
+  return (
+    <section className="insight-panel">
+      <div className="panel-heading">
+        <h2>{title}</h2>
+        {type === "trending" ? <TrendingUp size={20} /> : <CircleDollarSign size={20} />}
+      </div>
+      {!hasActivity && <p className="panel-note">{emptyLabel}</p>}
+      <div className="insight-list">
+        {items.map((item) => {
+          const activity = getMarketActivity(state, item.match.id, item.market.id);
+          const probability = impliedProbability(item.market.oddsBps);
+          return (
+            <button className="insight-row" key={`${title}-${item.match.id}-${item.market.id}`} type="button" onClick={() => onSelect(item)}>
+              <div>
+                <strong>{marketQuestion(item.market, item.match)}</strong>
+                <span>
+                  {item.match.home} vs {item.match.away}
+                </span>
+                <small>{type === "volume" ? `${formatCents(activity.volumeCents)} vol` : `${activity.positions} positions`}</small>
+              </div>
+              <em>{Math.round(probability)}%</em>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function AccountScreen({
+  activeView,
+  allCards,
+  earnedBadges,
+  ownedCounts,
+  packAvailable,
+  state,
+  onOpenPack,
+  onSelectView,
+  onShowToast,
+}: {
+  activeView: AccountView;
+  allCards: CardDefinition[];
+  earnedBadges: ReturnType<typeof getEarnedBadges>;
+  ownedCounts: Record<string, number>;
+  packAvailable: boolean;
+  state: AppState;
+  onOpenPack: () => void;
+  onSelectView: (view: AccountView) => void;
+  onShowToast: (message: string) => void;
+}) {
+  const stats = getAccountStats(state);
+
+  return (
+    <main className="account-layout">
+      <aside className="account-nav">
+        <button className={activeView === "profile" ? "is-active" : ""} type="button" onClick={() => onSelectView("profile")}>
+          <User size={18} />
+          Profile
+        </button>
+        <button className={activeView === "rewards" ? "is-active" : ""} type="button" onClick={() => onSelectView("rewards")}>
+          <Gift size={18} />
+          Rewards
+        </button>
+        <button className={activeView === "leaderboard" ? "is-active" : ""} type="button" onClick={() => onSelectView("leaderboard")}>
+          <Medal size={18} />
+          Leaderboard
+        </button>
+        <button className={activeView === "help" ? "is-active" : ""} type="button" onClick={() => onSelectView("help")}>
+          <HelpCircle size={18} />
+          Help
+        </button>
+      </aside>
+
+      <section className="account-content">
+        {activeView === "profile" && (
+          <div className="account-card">
+            <SectionTitle eyebrow="Account" title="Profile" />
+            <div className="profile-grid">
+              <label className="field">
+                <span>Display name</span>
+                <input defaultValue="Prediction Arena Player" />
+              </label>
+              <label className="field">
+                <span>Wallet</span>
+                <input readOnly value="0x7A...91F" />
+              </label>
+              <label className="field wide">
+                <span>Bio</span>
+                <textarea defaultValue="World Cup markets, cards and match-day predictions." />
+              </label>
+            </div>
+            <button className="signup-button account-action" type="button" onClick={() => onShowToast("Profile saved locally for this session.")}>
+              Save profile
+            </button>
+          </div>
+        )}
+
+        {activeView === "rewards" && (
+          <div className="account-stack">
+            <div className="balance-hero">
+              <div>
+                <span>Available balance</span>
+                <strong>{formatCents(state.progress.balanceCents)}</strong>
+              </div>
+              <button className="signup-button" disabled={!packAvailable} type="button" onClick={onOpenPack}>
+                <PackageOpen size={18} />
+                Open starter pack
+              </button>
+            </div>
+
+            <div className="account-grid two">
+              <div className="account-card">
+                <SectionTitle eyebrow="History" title="Prediction results" />
+                <RewardHistory positions={state.positions} settled={state.settled} />
+              </div>
+              <div className="account-card">
+                <SectionTitle eyebrow="NFT layer" title="Cards and badges" />
+                <CardShelf cards={allCards} ownedCounts={ownedCounts} />
+                <BadgeShelf badges={earnedBadges} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeView === "leaderboard" && (
+          <div className="account-stack">
+            <SectionTitle eyebrow="Classification" title="Leaderboard" />
+            <div className="leaderboard-grid">
+              <LeaderboardTable label="Most predictions" metric={`${state.progress.totalBets}`} stats={stats} />
+              <LeaderboardTable label="Total value won" metric={formatCents(stats.totalWonCents)} stats={stats} />
+              <LeaderboardTable label="Correct predictions" metric={`${stats.correctPredictions}`} stats={stats} />
+            </div>
+          </div>
+        )}
+
+        {activeView === "help" && (
+          <div className="account-card">
+            <SectionTitle eyebrow="Support" title="Help" />
+            <div className="help-grid">
+              <div>
+                <LifeBuoy size={24} />
+                <strong>Report a problem</strong>
+                <p>Send fixture, settlement or card issues to the platform team.</p>
+              </div>
+              <label className="field wide">
+                <span>Message</span>
+                <textarea placeholder="Describe what happened..." />
+              </label>
+            </div>
+            <button className="signup-button account-action" type="button" onClick={() => onShowToast("Support request saved locally for the demo.")}>
+              Send request
+            </button>
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}
+
+function MenuItem({ icon, label, onClick }: { icon: ReactNode; label: string; onClick: () => void }) {
+  return (
+    <button className="menu-row" type="button" onClick={onClick}>
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+function SectionTitle({ eyebrow, title }: { eyebrow: string; title: string }) {
+  return (
+    <div className="section-title">
+      <span>{eyebrow}</span>
+      <h2>{title}</h2>
+    </div>
+  );
+}
+
+function TeamCompact({
   alignRight,
   code,
   logoUrl,
@@ -589,12 +1054,9 @@ function TeamIdentity({
   name: string;
 }) {
   return (
-    <div className={`team-identity ${alignRight ? "align-right" : ""}`}>
+    <div className={`team-compact ${alignRight ? "align-right" : ""}`}>
       <TeamAvatar code={code} logoUrl={logoUrl} />
-      <div>
-        <strong>{name}</strong>
-        <span>{code}</span>
-      </div>
+      <strong>{name}</strong>
     </div>
   );
 }
@@ -604,36 +1066,6 @@ function TeamAvatar({ code, logoUrl }: { code: string; logoUrl?: string }) {
     <img alt="" className="team-avatar" src={logoUrl} />
   ) : (
     <span className="team-avatar fallback">{code.slice(0, 3)}</span>
-  );
-}
-
-function LineupPitch({ match }: { match: MatchSnapshot }) {
-  const homeLineup = match.lineups?.[match.home];
-  const awayLineup = match.lineups?.[match.away];
-  const hasLineups = Boolean(homeLineup?.starters.length || awayLineup?.starters.length);
-
-  return (
-    <div className="lineup-card">
-      <div className="lineup-header">
-        <TeamIdentity code={match.homeCode} logoUrl={match.homeLogoUrl} name={match.home} />
-        <span>Lineups</span>
-        <TeamIdentity alignRight code={match.awayCode} logoUrl={match.awayLogoUrl} name={match.away} />
-      </div>
-      <div className={`pitch-surface ${hasLineups ? "has-lineups" : "is-empty"}`}>
-        {hasLineups ? (
-          <>
-            <LineupSide lineup={homeLineup} side="home" />
-            <LineupSide lineup={awayLineup} side="away" />
-          </>
-        ) : (
-          <div className="lineup-empty">
-            <BarChart3 />
-            <strong>Lineups unavailable from connected feeds</strong>
-            <p>TXLine covers fixtures, scores and odds. Starting XI data needs a mapped lineup provider before we show players here.</p>
-          </div>
-        )}
-      </div>
-    </div>
   );
 }
 
@@ -669,25 +1101,6 @@ function StatComparison({ label, left, right }: { label: string; left: string; r
   );
 }
 
-function EventList({ events }: { events: MatchEvent[] }) {
-  if (!events.length) {
-    return <div className="event-empty">No event timeline in the connected feed yet.</div>;
-  }
-  return (
-    <div className="event-list">
-      {events.slice(-6).map((event, index) => (
-        <div className="event-row" key={`${event.minute}-${event.player}-${index}`}>
-          <span>{event.minute}'</span>
-          <strong>{event.player}</strong>
-          <small>
-            {event.team} - {event.type}
-          </small>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function CardSelect({
   cards,
   inventory,
@@ -708,7 +1121,7 @@ function CardSelect({
   const owned = cards.filter((card) => card.type === type && inventory.includes(card.id));
 
   return (
-    <label className="field">
+    <label className="field compact-field">
       <span>{label}</span>
       <select value={value} onChange={(event) => onChange(event.target.value)}>
         <option value="">No card</option>
@@ -741,7 +1154,7 @@ function CardShelf({ cards, ownedCounts }: { cards: CardDefinition[]; ownedCount
             <span>{card.type}</span>
             <strong>{formatBps(card.bonusBps)}</strong>
           </div>
-          <h4>{card.name}</h4>
+          <h3>{card.name}</h3>
           <p>{card.condition}</p>
           <small>
             {card.rarity} x{ownedCounts[card.id]}
@@ -752,19 +1165,63 @@ function CardShelf({ cards, ownedCounts }: { cards: CardDefinition[]; ownedCount
   );
 }
 
-function PositionList({ positions }: { positions: PositionInput[] }) {
-  if (!positions.length) return <div className="event-empty">No open predictions on this match.</div>;
+function BadgeShelf({ badges }: { badges: ReturnType<typeof getEarnedBadges> }) {
   return (
-    <div className="position-list">
-      {positions.map((position) => (
-        <div className="position-row" key={position.id}>
+    <div className="badge-shelf">
+      {skillBadges.slice(0, 5).map((badge) => (
+        <div className={`badge-item ${badges.includes(badge) ? "is-earned" : ""}`} key={badge.id}>
+          <BadgeCheck size={18} />
           <div>
-            <strong>{position.marketLabel}</strong>
-            <span>{position.cardIds.length ? position.cardIds.join(", ") : "No card boost"}</span>
+            <strong>{badge.name}</strong>
+            <small>{badge.condition}</small>
           </div>
-          <small>{formatCents(position.stakeCents)}</small>
         </div>
       ))}
+    </div>
+  );
+}
+
+function RewardHistory({ positions, settled }: { positions: PositionInput[]; settled: SettledPosition[] }) {
+  const rows = [
+    ...positions.map((position) => ({ ...position, status: "Open", amount: -position.stakeCents })),
+    ...settled.map((position) => ({
+      ...position,
+      status: position.won ? "Won" : "Lost",
+      amount: position.won ? position.netProfitCents + position.bonusCents : -position.stakeCents,
+    })),
+  ];
+
+  if (!rows.length) return <div className="event-empty">No prediction history yet.</div>;
+
+  return (
+    <div className="history-list">
+      {rows.slice(0, 8).map((row) => (
+        <div className="history-row" key={row.id}>
+          <History size={17} />
+          <div>
+            <strong>{row.marketLabel}</strong>
+            <span>{row.status}</span>
+          </div>
+          <em className={row.amount >= 0 ? "is-positive" : "is-negative"}>{formatSignedCents(row.amount)}</em>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LeaderboardTable({ label, metric, stats }: { label: string; metric: string; stats: ReturnType<typeof getAccountStats> }) {
+  return (
+    <div className="account-card leaderboard-card">
+      <h3>{label}</h3>
+      <div className="leaderboard-row">
+        <span>1</span>
+        <User size={18} />
+        <strong>You</strong>
+        <em>{metric}</em>
+      </div>
+      <small>
+        Demo stats: {stats.correctPredictions} correct, {formatCents(stats.totalWonCents)} won.
+      </small>
     </div>
   );
 }
@@ -775,6 +1232,15 @@ function Metric({ icon, label, value }: { icon?: ReactNode; label: string; value
       {icon}
       <span>{label}</span>
       <strong>{value}</strong>
+    </div>
+  );
+}
+
+function FeedNotice({ message }: { message: string }) {
+  return (
+    <div className="feed-notice">
+      <ShieldCheck size={18} />
+      <span>{message}. Check TXLine guest JWT/API token and restart the FastAPI service.</span>
     </div>
   );
 }
@@ -813,6 +1279,59 @@ function loadState(): AppState {
   }
 }
 
+function pickLaunchMatch(matches: MatchSnapshot[]): MatchSnapshot | undefined {
+  return (
+    matches.find((match) => match.home === "Spain" && match.away === "Argentina") ??
+    matches.find((match) => match.home === "Argentina" && match.away === "Spain") ??
+    matches[0]
+  );
+}
+
+function rankTrendingMarkets(items: MarketItem[], state: AppState): MarketItem[] {
+  const ranked = [...items].sort((a, b) => {
+    const activityA = getMarketActivity(state, a.match.id, a.market.id);
+    const activityB = getMarketActivity(state, b.match.id, b.market.id);
+    return activityB.positions - activityA.positions || impliedProbability(b.market.oddsBps) - impliedProbability(a.market.oddsBps);
+  });
+  return ranked;
+}
+
+function rankVolumeMarkets(items: MarketItem[], state: AppState): MarketItem[] {
+  const ranked = [...items].sort((a, b) => {
+    const activityA = getMarketActivity(state, a.match.id, a.market.id);
+    const activityB = getMarketActivity(state, b.match.id, b.market.id);
+    return activityB.volumeCents - activityA.volumeCents || impliedProbability(b.market.oddsBps) - impliedProbability(a.market.oddsBps);
+  });
+  return ranked;
+}
+
+function getMarketActivity(state: AppState, matchId: string, marketId: string): MarketActivity {
+  const open = state.positions.filter((position) => position.matchId === matchId && position.marketId === marketId);
+  const settled = state.settled.filter((position) => position.matchId === matchId && position.marketId === marketId);
+  const positions = open.length + settled.length;
+  return {
+    volumeCents: [...open, ...settled].reduce((sum, position) => sum + position.stakeCents, 0),
+    positions,
+    bettors: positions > 0 && state.connected ? 1 : 0,
+    wonCents: settled.reduce((sum, position) => sum + (position.won ? position.netProfitCents + position.bonusCents : 0), 0),
+  };
+}
+
+function emptyActivity(): MarketActivity {
+  return { bettors: 0, positions: 0, volumeCents: 0, wonCents: 0 };
+}
+
+function getAccountStats(state: AppState) {
+  return {
+    correctPredictions: state.settled.filter((position) => position.won).length,
+    totalLostCents: state.settled.filter((position) => !position.won).reduce((sum, position) => sum + position.stakeCents, 0),
+    totalWonCents: state.settled.reduce(
+      (sum, position) => sum + (position.won ? position.netProfitCents + position.bonusCents : 0),
+      0,
+    ),
+  };
+}
+
 function lineupX(index: number, side: "home" | "away"): number {
   const lanes = side === "home" ? [9, 22, 36, 47] : [91, 78, 64, 53];
   return lanes[index % lanes.length];
@@ -822,6 +1341,12 @@ function lineupY(index: number): number {
   return [50, 24, 76, 38, 62, 14, 86, 30, 70, 45, 55][index % 11];
 }
 
+function outcomeLabels(market: MarketDefinition, match: MatchSnapshot): [string, string] {
+  if (market.id === "home-win") return [match.home, match.away];
+  if (market.id === "away-win") return [match.away, match.home];
+  return ["Yes", "No"];
+}
+
 function formatCents(cents: number): string {
   return (cents / 100).toLocaleString("en-US", {
     currency: "USD",
@@ -829,24 +1354,30 @@ function formatCents(cents: number): string {
   });
 }
 
+function formatSignedCents(cents: number): string {
+  const absolute = formatCents(Math.abs(cents));
+  if (cents > 0) return `+${absolute}`;
+  if (cents < 0) return `-${absolute}`;
+  return absolute;
+}
+
 function formatBps(bps: number): string {
   return `${(bps / 100).toLocaleString("en-US", { maximumFractionDigits: 2 })}%`;
 }
 
-function formatDecimal(oddsBps: number): string {
-  return (oddsBps / 10000).toLocaleString("en-US", { maximumFractionDigits: 2, minimumFractionDigits: 2 });
+function impliedProbability(oddsBps: number): number {
+  if (!oddsBps) return 0;
+  return Math.max(1, Math.min(99, (10000 / oddsBps) * 100));
 }
 
 function formatProbability(oddsBps: number): string {
   if (!oddsBps) return "--";
-  const cents = Math.round((10000 / oddsBps) * 100);
-  return `${Math.max(1, Math.min(99, cents))}c`;
+  return `${Math.round(impliedProbability(oddsBps))}c`;
 }
 
 function formatNoProbability(oddsBps: number): string {
   if (!oddsBps) return "--";
-  const yes = Math.max(1, Math.min(99, Math.round((10000 / oddsBps) * 100)));
-  return `${Math.max(1, 100 - yes)}c`;
+  return `${Math.max(1, 100 - Math.round(impliedProbability(oddsBps)))}c`;
 }
 
 function marketQuestion(market: MarketDefinition, match: MatchSnapshot): string {
@@ -868,10 +1399,10 @@ function marketQuestion(market: MarketDefinition, match: MatchSnapshot): string 
   }
 }
 
-function formatStart(value?: string): string {
+function formatStart(value?: string | number): string {
   if (!value) return "Time TBA";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  const date = typeof value === "number" ? new Date(value) : new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
   return date.toLocaleString("en-US", {
     day: "2-digit",
     hour: "2-digit",
