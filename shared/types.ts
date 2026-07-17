@@ -80,6 +80,18 @@ export interface TeamLineup {
   bench?: LineupPlayer[];
 }
 
+export interface TxLineOddsEntry {
+  id: string;
+  market: string;
+  selection: string;
+  decimal?: number;
+  american?: number;
+  impliedProbability?: number;
+  status?: string;
+  updatedAt?: string | number;
+  source: "txline";
+}
+
 export interface MatchSnapshot {
   id: string;
   home: string;
@@ -100,6 +112,7 @@ export interface MatchSnapshot {
   source: "txline" | "openligadb" | "statsbomb" | "demo";
   oracleProof?: string;
   events: MatchEvent[];
+  odds?: TxLineOddsEntry[];
   lineups?: Record<string, TeamLineup>;
 }
 

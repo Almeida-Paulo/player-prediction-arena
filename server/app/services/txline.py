@@ -49,6 +49,8 @@ async def fetch_txline_matches(settings: Settings) -> list[dict[str, Any]] | Non
     ]
     world_cup_matches = [mapped for item, mapped in mapped_pairs if is_world_cup_fixture(item)]
     matches = world_cup_matches or [mapped for _, mapped in mapped_pairs]
+    if matches:
+        await hydrate_odds_snapshots(client, base, settings, guest_jwt, matches)
     return matches or None
 
 
@@ -84,6 +86,49 @@ async def fetch_fixtures_snapshot(
         },
         params=params,
     )
+
+
+async def fetch_odds_snapshot(
+    client: httpx.AsyncClient,
+    base: str,
+    settings: Settings,
+    guest_jwt: str,
+    fixture_id: str,
+) -> list[dict[str, Any]]:
+    try:
+        response = await client.get(
+            f"{base}/api/odds/snapshot/{fixture_id}",
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {guest_jwt}",
+                "X-Api-Token": settings.txline_api_token,
+            },
+        )
+        if response.status_code >= 400:
+            return []
+        payload = response.json()
+    except (httpx.HTTPError, ValueError):
+        return []
+
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        data = payload.get("data", [])
+        return [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
+    return []
+
+
+async def hydrate_odds_snapshots(
+    client: httpx.AsyncClient,
+    base: str,
+    settings: Settings,
+    guest_jwt: str,
+    matches: list[dict[str, Any]],
+) -> None:
+    for match in matches[:8]:
+        odds_items = await fetch_odds_snapshot(client, base, settings, guest_jwt, str(match["id"]))
+        mapped_odds = [mapped for item in odds_items if (mapped := map_txline_odds(item))]
+        match["odds"] = mapped_odds[:24]
 
 
 def map_txline_fixture(item: dict[str, Any]) -> dict[str, Any] | None:
@@ -122,6 +167,83 @@ def map_txline_fixture(item: dict[str, Any]) -> dict[str, Any] | None:
         "source": "txline",
         "oracleProof": f"txline:{fixture_id}",
         "events": map_events(item, home, away),
+        "odds": [],
+    }
+
+
+def map_txline_odds(item: dict[str, Any]) -> dict[str, Any] | None:
+    market = str(
+        first_value(
+            item,
+            "SuperOddsType",
+            "superOddsType",
+            "OddsType",
+            "oddsType",
+            "Market",
+            "market",
+            "MarketName",
+            "marketName",
+        )
+        or ""
+    )
+    selection = str(
+        first_value(
+            item,
+            "Selection",
+            "selection",
+            "Outcome",
+            "outcome",
+            "Name",
+            "name",
+            "Participant",
+            "participant",
+        )
+        or ""
+    )
+    decimal = safe_float(
+        first_value(
+            item,
+            "Decimal",
+            "decimal",
+            "DecimalOdds",
+            "decimalOdds",
+            "Price",
+            "price",
+            "Odds",
+            "odds",
+        )
+    )
+    american = safe_int_or_none(first_value(item, "American", "american", "AmericanOdds", "americanOdds"))
+    implied = safe_float(
+        first_value(
+            item,
+            "ImpliedProbability",
+            "impliedProbability",
+            "Probability",
+            "probability",
+            "Prob",
+            "prob",
+        )
+    )
+    if implied and implied > 1:
+        implied = implied / 100
+    if not implied and decimal and decimal > 1:
+        implied = 1 / decimal
+
+    if not any([market, selection, decimal, american, implied]):
+        return None
+
+    odds_id = str(first_value(item, "Id", "id", "OddsId", "oddsId", "MarketId", "marketId") or f"{market}:{selection}")
+    return {
+        "id": odds_id,
+        "market": market or "Market",
+        "selection": selection or "Selection",
+        "decimal": decimal,
+        "american": american,
+        "impliedProbability": implied,
+        "status": first_value(item, "Status", "status", "Suspended", "suspended"),
+        "updatedAt": first_value(item, "Ts", "ts", "Timestamp", "timestamp", "UpdatedAt", "updatedAt"),
+        "source": "txline",
     }
 
 
@@ -206,6 +328,24 @@ def safe_int(value: Any) -> int:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def safe_int_or_none(value: Any) -> int | None:
+    try:
+        if value in (None, ""):
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def safe_float(value: Any) -> float | None:
+    try:
+        if value in (None, ""):
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def is_world_cup_fixture(item: dict[str, Any]) -> bool:

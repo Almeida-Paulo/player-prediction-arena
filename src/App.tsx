@@ -18,6 +18,7 @@ import {
   PackageOpen,
   Search,
   ShieldCheck,
+  Trophy,
   TrendingUp,
   User,
   Users,
@@ -398,7 +399,7 @@ export function App() {
         <nav className="category-nav" aria-label="Prediction categories">
           {categories.map((category) => (
             <button className={category === "World Cup" ? "is-active" : ""} key={category} type="button">
-              {category === "World Cup" && <img alt="" className="cup-nav-icon" src={worldCupLogo} />}
+              {category === "World Cup" && <Trophy size={17} />}
               {category}
             </button>
           ))}
@@ -621,6 +622,8 @@ function FeaturedMarket({
             />
           </div>
 
+          <OddsStrip odds={match.odds ?? []} />
+
           <div className="market-meta-grid">
             <Metric icon={<Users />} label="Positions" value={String(activity.positions)} />
             <Metric icon={<CircleDollarSign />} label="Volume" value={formatCents(activity.volumeCents)} />
@@ -742,6 +745,31 @@ function PositionShareChart({
   );
 }
 
+function OddsStrip({ odds }: { odds: MatchSnapshot["odds"] }) {
+  const visibleOdds = (odds ?? []).slice(0, 3);
+  return (
+    <div className="stableprice-strip">
+      <div>
+        <span>StablePrice odds</span>
+        <strong>{visibleOdds.length ? "TXODDS consensus" : "Awaiting odds snapshot"}</strong>
+      </div>
+      {visibleOdds.length ? (
+        <div className="odds-pill-list">
+          {visibleOdds.map((odd) => (
+            <span className="odds-pill" key={odd.id}>
+              <small>{cleanMarketLabel(odd.market)}</small>
+              <strong>{odd.selection}</strong>
+              <em>{formatOdd(odd)}</em>
+            </span>
+          ))}
+        </div>
+      ) : (
+        <p>Odds appear here when `/api/odds/snapshot` returns markets for this fixture.</p>
+      )}
+    </div>
+  );
+}
+
 function OutcomeRow({
   label,
   logoUrl,
@@ -799,6 +827,7 @@ function MarketCard({
           <em>No</em>
         </div>
       </div>
+      <MarketCardOdds odds={item.match.odds ?? []} />
       <div className="card-footer">
         <span>{formatCents(activity.volumeCents)} vol.</span>
         <div>
@@ -807,6 +836,20 @@ function MarketCard({
         </div>
       </div>
     </button>
+  );
+}
+
+function MarketCardOdds({ odds }: { odds: MatchSnapshot["odds"] }) {
+  const firstOdd = odds?.[0];
+  if (!firstOdd) {
+    return <div className="mini-odds is-empty">StablePrice odds pending</div>;
+  }
+  return (
+    <div className="mini-odds">
+      <span>TXODDS</span>
+      <strong>{cleanMarketLabel(firstOdd.market)}</strong>
+      <em>{formatOdd(firstOdd)}</em>
+    </div>
   );
 }
 
@@ -1537,6 +1580,21 @@ function formatProbability(oddsBps: number): string {
 function formatNoProbability(oddsBps: number): string {
   if (!oddsBps) return "--";
   return `${Math.max(1, 100 - Math.round(impliedProbability(oddsBps)))}¢`;
+}
+
+function formatOdd(odd: NonNullable<MatchSnapshot["odds"]>[number]): string {
+  if (odd.decimal) return `${odd.decimal.toFixed(2)}x`;
+  if (odd.american) return odd.american > 0 ? `+${odd.american}` : String(odd.american);
+  if (odd.impliedProbability) return `${Math.round(odd.impliedProbability * 100)}%`;
+  return "Live";
+}
+
+function cleanMarketLabel(value: string): string {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Market";
 }
 
 function numericStat(value: string): number {

@@ -276,13 +276,6 @@ p {
   color: var(--accent-dark);
 }
 
-.cup-nav-icon {
-  border-radius: 5px;
-  height: 20px;
-  object-fit: contain;
-  width: 20px;
-}
-
 .feed-notice {
   align-items: center;
   background: #fffbeb;
@@ -381,9 +374,9 @@ p {
 
 .market-icon img {
   display: block;
-  height: 34px;
+  height: 40px;
   object-fit: contain;
-  width: 34px;
+  width: 40px;
 }
 
 .market-type span {
@@ -508,6 +501,85 @@ p {
   font-size: 21px;
   font-weight: 820;
   text-align: right;
+}
+
+.stableprice-strip {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 150px minmax(0, 1fr);
+  margin: -4px 0 22px;
+  padding: 12px;
+}
+
+.stableprice-strip > div:first-child span,
+.stableprice-strip > div:first-child strong {
+  display: block;
+}
+
+.stableprice-strip > div:first-child span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 820;
+  margin-bottom: 3px;
+  text-transform: uppercase;
+}
+
+.stableprice-strip > div:first-child strong {
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.stableprice-strip p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.odds-pill-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.odds-pill {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: grid;
+  gap: 2px;
+  min-width: 112px;
+  padding: 8px 10px;
+}
+
+.odds-pill small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 820;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.odds-pill strong {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.odds-pill em {
+  color: var(--accent-dark);
+  font-size: 14px;
+  font-style: normal;
+  font-weight: 850;
 }
 
 .team-avatar {
@@ -1224,6 +1296,45 @@ p {
 .mini-outcomes {
   display: grid;
   gap: 8px;
+}
+
+.mini-odds {
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  display: grid;
+  gap: 2px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 8px 10px;
+}
+
+.mini-odds span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 820;
+  grid-column: 1 / -1;
+  text-transform: uppercase;
+}
+
+.mini-odds strong {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini-odds em {
+  color: var(--accent-dark);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 850;
+}
+
+.mini-odds.is-empty {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+  font-weight: 720;
 }
 
 .mini-outcomes div {
@@ -1949,6 +2060,7 @@ p {
   .trade-inputs,
   .trade-actions,
   .lineup-stats,
+  .stableprice-strip,
   .prediction-grid,
   .insight-column,
   .profile-grid,
