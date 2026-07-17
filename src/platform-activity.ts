@@ -91,7 +91,9 @@ export const platformUsers: PlatformUser[] = [
   },
 ];
 
-const dayLabels = ["Jul 05", "Jul 06", "Jul 07", "Jul 08", "Jul 09", "Jul 10", "Jul 11", "Jul 12", "Jul 13", "Jul 14", "Jul 15", "Jul 16", "Jul 17"];
+const historyPointCount = 60;
+const historyStart = Date.UTC(2026, 4, 20);
+const historyEnd = Date.UTC(2026, 6, 17);
 
 export function getPlatformMarketActivity(match: MatchSnapshot, market: MarketDefinition): PlatformMarketActivity {
   const seed = hash(`${match.id}:${market.id}:${match.home}:${match.away}`);
@@ -117,22 +119,40 @@ export function rankPlatformUsersBy(metric: "predictions" | "wonCents" | "correc
 }
 
 function buildHistory(seed: number, targetProbability: number, volumeCents: number): PlatformHistoryPoint[] {
-  const start = clamp(targetProbability + (seededNumber(seed, 10) - 0.5) * 16, 6, 94);
-  let current = start;
+  const targetYes = clamp(targetProbability, 3, 97);
+  const targetNo = clamp(100 - targetYes, 3, 97);
+  const startYes = clamp(targetYes * (0.18 + seededNumber(seed, 10) * 0.12), 4, 22);
+  const startNo = clamp(targetNo * (0.18 + seededNumber(seed, 11) * 0.12), 4, 22);
 
-  return dayLabels.map((label, index) => {
-    const drift = (targetProbability - current) * 0.22;
-    const noise = (seededNumber(seed, 20 + index) - 0.5) * 9;
-    const jump = index === dayLabels.length - 2 ? (seededNumber(seed, 70) - 0.35) * 10 : 0;
-    current = clamp(current + drift + noise + jump, 3, 97);
-    const progress = (index + 1) / dayLabels.length;
+  return Array.from({ length: historyPointCount }, (_, index) => {
+    const progress = index / (historyPointCount - 1);
+    const label = historyLabel(index);
+    const yes = index === historyPointCount - 1 ? targetYes : marketCurve(seed, index, startYes, targetYes, progress, 20);
+    const no = index === historyPointCount - 1 ? targetNo : marketCurve(seed, index, startNo, targetNo, progress, 80);
 
     return {
       label,
-      no: clamp(100 - current, 3, 97),
+      no,
       volumeCents: Math.round(volumeCents * progress * (0.72 + seededNumber(seed, 90 + index) * 0.28)),
-      yes: current,
+      yes,
     };
+  });
+}
+
+function marketCurve(seed: number, index: number, start: number, target: number, progress: number, salt: number): number {
+  const lateMove = Math.pow(progress, 5.2);
+  const drift = start + (target - start) * lateMove;
+  const pulse = Math.sin((progress * Math.PI * 5) + seededNumber(seed, salt) * Math.PI) * 1.2;
+  const noise = (seededNumber(seed, salt + index) - 0.5) * 2.2;
+  return clamp(drift + pulse + noise, 1, 99);
+}
+
+function historyLabel(index: number): string {
+  const timestamp = historyStart + ((historyEnd - historyStart) * index) / (historyPointCount - 1);
+  return new Date(timestamp).toLocaleDateString("en-US", {
+    day: "2-digit",
+    month: "short",
+    timeZone: "UTC",
   });
 }
 

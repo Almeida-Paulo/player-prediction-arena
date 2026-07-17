@@ -570,8 +570,7 @@ function FeaturedMarket({
   onSettle: () => void;
   onShowToast: (message: string) => void;
 }) {
-  const yesPercent = impliedProbability(market.oddsBps);
-  const noPercent = 100 - yesPercent;
+  const [yesPercent, noPercent] = currentOutcomePercents(activity, market.oddsBps);
   const [primaryOutcome, secondaryOutcome] = outcomeRows(market, match);
   const selectedCardLabel = selectedCards.length
     ? selectedCards.map((card) => card.name).join(", ")
@@ -677,10 +676,10 @@ function FeaturedMarket({
 
         <div className="trade-actions">
           <button className="yes-button" type="button" onClick={onPlacePrediction}>
-            Yes {formatProbability(market.oddsBps)}
+            Yes {formatPercentCents(yesPercent)}
           </button>
           <button className="no-button" type="button" onClick={() => onShowToast("No-side settlement will be wired next.")}>
-            No {formatNoProbability(market.oddsBps)}
+            No {formatPercentCents(noPercent)}
           </button>
           <button className="settle-button" type="button" onClick={onSettle}>
             <ShieldCheck size={17} />
@@ -706,11 +705,13 @@ function PositionShareChart({
   yesLabel: string;
   yesPercent: number;
 }) {
-  const chartHistory = activity.history.length
-    ? [...activity.history, { label: "Now", no: noPercent, volumeCents: activity.volumeCents, yes: yesPercent }]
-    : [];
-  const yesLine = chartHistory.length ? historyLinePoints(chartHistory, "yes") : flatLinePoints(yesPercent);
-  const noLine = chartHistory.length ? historyLinePoints(chartHistory, "no") : flatLinePoints(noPercent);
+  const chartHistory = activity.history.length ? activity.history : [{ label: "Now", no: noPercent, volumeCents: 0, yes: yesPercent }];
+  const maxPercent = chartMaxPercent(chartHistory);
+  const yTicks = chartTicks(maxPercent);
+  const xTicks = chartDateTicks(chartHistory);
+  const lastPointX = chartX(chartHistory.length - 1, chartHistory.length);
+  const yesLine = chartHistory.length ? historyLinePoints(chartHistory, "yes", maxPercent) : flatLinePoints(yesPercent, maxPercent);
+  const noLine = chartHistory.length ? historyLinePoints(chartHistory, "no", maxPercent) : flatLinePoints(noPercent, maxPercent);
 
   return (
     <div className="position-chart-card">
@@ -721,21 +722,27 @@ function PositionShareChart({
         </div>
         <small>{activity.positions.toLocaleString("en-US")} platform positions</small>
       </div>
-      <svg className="line-chart" role="img" viewBox="0 0 320 176" aria-label="Current market probability line">
-        <line className="chart-rule" x1="0" x2="320" y1="32" y2="32" />
-        <line className="chart-rule" x1="0" x2="320" y1="88" y2="88" />
-        <line className="chart-rule" x1="0" x2="320" y1="144" y2="144" />
+      <svg className="line-chart" role="img" viewBox="0 0 340 176" aria-label="Platform probability history">
+        {yTicks.map((tick) => {
+          const y = chartY(tick, maxPercent);
+          return (
+            <g key={tick}>
+              <line className="chart-rule" x1="12" x2="292" y1={y} y2={y} />
+              <text className="chart-y-label" x="306" y={y + 4}>
+                {tick}%
+              </text>
+            </g>
+          );
+        })}
         <polyline className="line yes" points={yesLine} />
         <polyline className="line no" points={noLine} />
-        <circle className="line-dot yes" cx="300" cy={chartY(yesPercent)} r="4.5" />
-        <circle className="line-dot no" cx="300" cy={chartY(noPercent)} r="4.5" />
+        <circle className="line-dot yes" cx={lastPointX} cy={chartY(yesPercent, maxPercent)} r="4.5" />
+        <circle className="line-dot no" cx={lastPointX} cy={chartY(noPercent, maxPercent)} r="4.5" />
       </svg>
-      <div className="chart-axis">
-        <span>0%</span>
-        <span>25%</span>
-        <span>50%</span>
-        <span>75%</span>
-        <span>100%</span>
+      <div className="chart-x-axis">
+        {xTicks.map((tick) => (
+          <span key={`${tick.index}-${tick.label}`}>{tick.label}</span>
+        ))}
       </div>
       <div className="legend-row">
         <span>
@@ -814,8 +821,7 @@ function MarketCard({
   item: MarketItem;
   onSelect: () => void;
 }) {
-  const yesPercent = impliedProbability(item.market.oddsBps);
-  const noPercent = 100 - yesPercent;
+  const [yesPercent, noPercent] = currentOutcomePercents(activity, item.market.oddsBps);
 
   return (
     <button className={`prediction-card ${isSelected ? "is-selected" : ""}`} type="button" onClick={onSelect}>
@@ -936,7 +942,7 @@ function MarketInsightPanel({
       <div className="insight-list">
         {items.map((item) => {
           const activity = getMarketActivity(state, item.match, item.market);
-          const probability = impliedProbability(item.market.oddsBps);
+          const [probability] = currentOutcomePercents(activity, item.market.oddsBps);
           return (
             <button className="insight-row" key={`${title}-${item.match.id}-${item.market.id}`} type="button" onClick={() => onSelect(item)}>
               <div>
@@ -1634,23 +1640,56 @@ function outcomeRows(market: MarketDefinition, match: MatchSnapshot): [OutcomeDi
   ];
 }
 
-function chartY(percent: number): number {
-  return 160 - Math.max(1, Math.min(99, percent)) * 1.44;
+const chartLeft = 12;
+const chartRight = 292;
+const chartTop = 16;
+const chartBottom = 152;
+
+function chartX(index: number, length: number): number {
+  if (length <= 1) return chartRight;
+  return chartLeft + ((chartRight - chartLeft) * index) / (length - 1);
 }
 
-function flatLinePoints(percent: number): string {
-  const y = chartY(percent);
-  return [20, 76, 132, 188, 244, 300].map((x) => `${x},${y}`).join(" ");
+function chartY(percent: number, maxPercent: number): number {
+  const bounded = Math.max(0, Math.min(maxPercent, percent));
+  return chartBottom - (bounded / maxPercent) * (chartBottom - chartTop);
 }
 
-function historyLinePoints(history: PlatformHistoryPoint[], key: "yes" | "no"): string {
-  if (history.length <= 1) return flatLinePoints(history[0]?.[key] ?? 50);
+function flatLinePoints(percent: number, maxPercent: number): string {
+  const y = chartY(percent, maxPercent);
+  return [0, 1, 2, 3, 4, 5].map((index) => `${chartX(index, 6)},${y}`).join(" ");
+}
+
+function historyLinePoints(history: PlatformHistoryPoint[], key: "yes" | "no", maxPercent: number): string {
+  if (history.length <= 1) return flatLinePoints(history[0]?.[key] ?? 50, maxPercent);
   return history
     .map((point, index) => {
-      const x = 20 + (280 * index) / (history.length - 1);
-      return `${x.toFixed(1)},${chartY(point[key]).toFixed(1)}`;
+      const x = chartX(index, history.length);
+      return `${x.toFixed(1)},${chartY(point[key], maxPercent).toFixed(1)}`;
     })
     .join(" ");
+}
+
+function chartMaxPercent(history: PlatformHistoryPoint[]): number {
+  const highest = history.reduce((max, point) => Math.max(max, point.yes, point.no), 0);
+  if (highest <= 60) return Math.max(15, Math.ceil(highest / 15) * 15);
+  return 100;
+}
+
+function chartTicks(maxPercent: number): number[] {
+  if (maxPercent > 60) return [100, 75, 50, 25, 0];
+  const step = maxPercent <= 60 ? 15 : 25;
+  const ticks: number[] = [];
+  for (let tick = maxPercent; tick >= 0; tick -= step) ticks.push(tick);
+  if (ticks[ticks.length - 1] !== 0) ticks.push(0);
+  return ticks;
+}
+
+function chartDateTicks(history: PlatformHistoryPoint[]): Array<{ index: number; label: string }> {
+  if (!history.length) return [];
+  const lastIndex = history.length - 1;
+  const indexes = [0, 0.25, 0.5, 0.75, 1].map((ratio) => Math.round(lastIndex * ratio));
+  return [...new Set(indexes)].map((index) => ({ index, label: history[index]?.label ?? "" }));
 }
 
 function formatCents(cents: number): string {
@@ -1667,6 +1706,13 @@ function formatSignedCents(cents: number): string {
   return absolute;
 }
 
+function currentOutcomePercents(activity: MarketActivity, fallbackOddsBps: number): [number, number] {
+  const latest = activity.history[activity.history.length - 1];
+  if (latest) return [latest.yes, latest.no];
+  const yes = impliedProbability(fallbackOddsBps);
+  return [yes, 100 - yes];
+}
+
 function formatLeaderboardMetric(
   user: PlatformUser,
   metricKey: "predictions" | "wonCents" | "correctPredictions",
@@ -1677,6 +1723,10 @@ function formatLeaderboardMetric(
 
 function formatBps(bps: number): string {
   return `${(bps / 100).toLocaleString("en-US", { maximumFractionDigits: 2 })}%`;
+}
+
+function formatPercentCents(percent: number): string {
+  return `${Math.max(1, Math.min(99, Math.round(percent)))}¢`;
 }
 
 function impliedProbability(oddsBps: number): number {
@@ -1766,9 +1816,8 @@ function flagUrlForCode(code: string): string {
 function marketQuestion(market: MarketDefinition, match: MatchSnapshot): string {
   switch (market.id) {
     case "home-win":
-      return `Will ${match.home} beat ${match.away}?`;
     case "away-win":
-      return `Will ${match.away} beat ${match.home}?`;
+      return worldCupResultQuestion(match) ?? `Who will win, ${match.home} or ${match.away}?`;
     case "home-goal":
       return `Will ${match.home} score?`;
     case "home-clean-sheet":
@@ -1780,6 +1829,13 @@ function marketQuestion(market: MarketDefinition, match: MatchSnapshot): string 
     default:
       return market.label;
   }
+}
+
+function worldCupResultQuestion(match: MatchSnapshot): string | undefined {
+  const participants = [match.home, match.away].map((team) => team.toLowerCase()).sort().join(":");
+  if (participants === "argentina:spain") return "Who will win the World Cup?";
+  if (participants === "england:france") return "Who will win the World Cup third-place match?";
+  return undefined;
 }
 
 function formatStart(value?: string | number): string {

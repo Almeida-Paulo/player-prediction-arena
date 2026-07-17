@@ -736,23 +736,30 @@ p {
   fill: #80bdff;
 }
 
-.chart-axis {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  margin-top: -8px;
+.chart-y-label {
+  fill: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
 }
 
-.chart-axis span {
+.chart-x-axis {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  margin-top: -10px;
+  max-width: calc(100% - 42px);
+}
+
+.chart-x-axis span {
   color: var(--faint);
   font-size: 12px;
   font-weight: 700;
 }
 
-.chart-axis span:not(:first-child) {
+.chart-x-axis span:not(:first-child) {
   text-align: center;
 }
 
-.chart-axis span:last-child {
+.chart-x-axis span:last-child {
   text-align: right;
 }
 
