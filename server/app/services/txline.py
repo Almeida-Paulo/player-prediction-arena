@@ -1,8 +1,15 @@
+import asyncio
+import json
+import logging
 from typing import Any
 
 import httpx
 
 from ..config import Settings
+from ..db import get_pool
+
+logger = logging.getLogger(__name__)
+_txline_odds_tables_ready = False
 
 
 async def fetch_txline_matches(settings: Settings) -> list[dict[str, Any]] | None:
@@ -103,6 +110,7 @@ async def fetch_odds_snapshot(
                 "Authorization": f"Bearer {guest_jwt}",
                 "X-Api-Token": settings.txline_api_token,
             },
+            timeout=5,
         )
         if response.status_code >= 400:
             return []
@@ -125,13 +133,36 @@ async def hydrate_odds_snapshots(
     guest_jwt: str,
     matches: list[dict[str, Any]],
 ) -> None:
-    for match in matches[:8]:
-        fixture_id = str(match.get("id") or "")
-        if not fixture_id:
-            continue
-        odds_items = await fetch_odds_snapshot(client, base, settings, guest_jwt, fixture_id)
-        mapped_odds = [mapped for item in odds_items for mapped in map_txline_odds(item, match)]
-        match["odds"] = sorted(mapped_odds, key=odds_sort_key)[:24]
+    await asyncio.gather(
+        *(
+            hydrate_odds_snapshot(client, base, settings, guest_jwt, match)
+            for match in matches[:8]
+        )
+    )
+
+
+async def hydrate_odds_snapshot(
+    client: httpx.AsyncClient,
+    base: str,
+    settings: Settings,
+    guest_jwt: str,
+    match: dict[str, Any],
+) -> None:
+    fixture_id = str(match.get("id") or "")
+    if not fixture_id:
+        return
+
+    odds_items = await fetch_odds_snapshot(client, base, settings, guest_jwt, fixture_id)
+    mapped_odds = [mapped for item in odds_items for mapped in map_txline_odds(item, match)]
+    if mapped_odds:
+        sorted_odds = sorted(mapped_odds, key=odds_sort_key)[:24]
+        match["odds"] = sorted_odds
+        save_txline_odds_snapshot(fixture_id, odds_items, sorted_odds)
+        return
+
+    cached_odds = load_txline_odds_snapshot(fixture_id)
+    if cached_odds:
+        match["odds"] = sorted(cached_odds, key=odds_sort_key)[:24]
 
 
 def map_txline_fixture(item: dict[str, Any]) -> dict[str, Any] | None:
@@ -330,6 +361,142 @@ def odds_sort_key(item: dict[str, Any]) -> tuple[int, int, str]:
     market = str(item.get("market") or "").lower()
     is_result = "1x2" in market or "participant result" in market or "result" in market
     return (0 if is_result else 1, safe_int(item.get("sortOrder", 3)), str(item.get("selection") or ""))
+
+
+def ensure_txline_odds_tables() -> bool:
+    global _txline_odds_tables_ready
+    if _txline_odds_tables_ready:
+        return True
+
+    try:
+        with get_pool().connection() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS txline_odds_snapshots (
+                  fixture_id TEXT PRIMARY KEY,
+                  odds_json JSONB NOT NULL,
+                  raw_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+                  source_ts BIGINT,
+                  fetched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS txline_odds_history (
+                  fixture_id TEXT NOT NULL,
+                  odds_id TEXT NOT NULL,
+                  market TEXT NOT NULL,
+                  selection TEXT NOT NULL,
+                  short_label TEXT,
+                  selection_role TEXT,
+                  decimal_price NUMERIC,
+                  american_price INTEGER,
+                  implied_probability NUMERIC,
+                  source_ts BIGINT NOT NULL DEFAULT 0,
+                  odds_json JSONB NOT NULL,
+                  captured_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                  PRIMARY KEY (fixture_id, odds_id, source_ts)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_txline_odds_history_fixture_time
+                  ON txline_odds_history(fixture_id, source_ts DESC)
+                """
+            )
+        _txline_odds_tables_ready = True
+        return True
+    except Exception as exc:
+        logger.warning("Unable to ensure TXLine odds tables: %s", exc)
+        return False
+
+
+def save_txline_odds_snapshot(
+    fixture_id: str,
+    raw_items: list[dict[str, Any]],
+    mapped_odds: list[dict[str, Any]],
+) -> None:
+    if not mapped_odds or not ensure_txline_odds_tables():
+        return
+
+    source_ts_values = [
+        safe_int_or_none(first_value(item, "Ts", "ts", "Timestamp", "timestamp"))
+        for item in raw_items
+    ]
+    source_ts = max((value for value in source_ts_values if value is not None), default=None)
+
+    try:
+        with get_pool().connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO txline_odds_snapshots (fixture_id, odds_json, raw_json, source_ts, fetched_at, updated_at)
+                VALUES (%s, %s::jsonb, %s::jsonb, %s, now(), now())
+                ON CONFLICT (fixture_id) DO UPDATE SET
+                  odds_json = EXCLUDED.odds_json,
+                  raw_json = EXCLUDED.raw_json,
+                  source_ts = EXCLUDED.source_ts,
+                  fetched_at = EXCLUDED.fetched_at,
+                  updated_at = now()
+                """,
+                (fixture_id, json.dumps(mapped_odds), json.dumps(raw_items), source_ts),
+            )
+            for odd in mapped_odds:
+                odd_source_ts = safe_int_or_none(odd.get("updatedAt")) or 0
+                conn.execute(
+                    """
+                    INSERT INTO txline_odds_history (
+                      fixture_id, odds_id, market, selection, short_label, selection_role,
+                      decimal_price, american_price, implied_probability, source_ts, odds_json, captured_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, now())
+                    ON CONFLICT (fixture_id, odds_id, source_ts) DO NOTHING
+                    """,
+                    (
+                        fixture_id,
+                        str(odd.get("id") or ""),
+                        str(odd.get("market") or ""),
+                        str(odd.get("selection") or ""),
+                        odd.get("shortLabel"),
+                        odd.get("selectionRole"),
+                        odd.get("decimal"),
+                        odd.get("american"),
+                        odd.get("impliedProbability"),
+                        odd_source_ts,
+                        json.dumps(odd),
+                    ),
+                )
+    except Exception as exc:
+        logger.warning("Unable to save TXLine odds snapshot for fixture %s: %s", fixture_id, exc)
+
+
+def load_txline_odds_snapshot(fixture_id: str) -> list[dict[str, Any]]:
+    if not ensure_txline_odds_tables():
+        return []
+
+    try:
+        with get_pool().connection() as conn:
+            row = conn.execute(
+                "SELECT odds_json FROM txline_odds_snapshots WHERE fixture_id = %s",
+                (fixture_id,),
+            ).fetchone()
+    except Exception as exc:
+        logger.warning("Unable to load cached TXLine odds for fixture %s: %s", fixture_id, exc)
+        return []
+
+    if not row:
+        return []
+    odds_json = row["odds_json"]
+    if isinstance(odds_json, list):
+        return [item for item in odds_json if isinstance(item, dict)]
+    if isinstance(odds_json, str):
+        try:
+            loaded = json.loads(odds_json)
+        except ValueError:
+            return []
+        return [item for item in loaded if isinstance(item, dict)] if isinstance(loaded, list) else []
+    return []
 
 
 def first_value(item: dict[str, Any], *keys: str) -> Any:

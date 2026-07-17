@@ -52,3 +52,31 @@ CREATE TABLE IF NOT EXISTS earned_badges (
   earned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, badge_id)
 );
+
+CREATE TABLE IF NOT EXISTS txline_odds_snapshots (
+  fixture_id TEXT PRIMARY KEY,
+  odds_json JSONB NOT NULL,
+  raw_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  source_ts BIGINT,
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS txline_odds_history (
+  fixture_id TEXT NOT NULL,
+  odds_id TEXT NOT NULL,
+  market TEXT NOT NULL,
+  selection TEXT NOT NULL,
+  short_label TEXT,
+  selection_role TEXT,
+  decimal_price NUMERIC,
+  american_price INTEGER,
+  implied_probability NUMERIC,
+  source_ts BIGINT NOT NULL DEFAULT 0,
+  odds_json JSONB NOT NULL,
+  captured_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (fixture_id, odds_id, source_ts)
+);
+
+CREATE INDEX IF NOT EXISTS idx_txline_odds_history_fixture_time
+  ON txline_odds_history(fixture_id, source_ts DESC);
