@@ -18,7 +18,6 @@ import {
   PackageOpen,
   Search,
   ShieldCheck,
-  Trophy,
   TrendingUp,
   User,
   Users,
@@ -26,6 +25,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import worldCupLogo from "../assets/fifa-world-cup-2026-logo-footylogos.png";
 import predictionLogo from "../assets/Prediction-Arena-logo.png";
 import { skillBadges } from "../shared/badges";
 import { cards as cardCatalog, starterPackPool } from "../shared/cards";
@@ -398,7 +398,7 @@ export function App() {
         <nav className="category-nav" aria-label="Prediction categories">
           {categories.map((category) => (
             <button className={category === "World Cup" ? "is-active" : ""} key={category} type="button">
-              {category === "World Cup" && <Trophy size={17} />}
+              {category === "World Cup" && <img alt="" className="cup-nav-icon" src={worldCupLogo} />}
               {category}
             </button>
           ))}
@@ -573,7 +573,7 @@ function FeaturedMarket({
       <div className="featured-toolbar">
         <div className="market-type">
           <span className="market-icon">
-            <Trophy size={22} />
+            <img alt="" src={worldCupLogo} />
           </span>
           <div>
             <span>Football</span>
@@ -817,6 +817,7 @@ function LineupPreview({ match }: { match: MatchSnapshot }) {
   const title = match.status === "SCHEDULED" ? "Expected lineups" : "Confirmed lineups";
   const homeStats = teamStats(match, match.home);
   const awayStats = teamStats(match, match.away);
+  const showStats = match.status !== "SCHEDULED";
 
   return (
     <section className="lineup-panel">
@@ -843,10 +844,11 @@ function LineupPreview({ match }: { match: MatchSnapshot }) {
         )}
       </div>
       <div className="lineup-stats">
-        <StatComparison label="Possession" left={`${homeStats.possession}%`} right={`${awayStats.possession}%`} />
-        <StatComparison label="Shots faced" left={String(homeStats.shotsAgainst)} right={String(awayStats.shotsAgainst)} />
-        <StatComparison label="Corners faced" left={String(homeStats.cornersAgainst)} right={String(awayStats.cornersAgainst)} />
+        <StatComparison label="Possession" left={`${homeStats.possession}%`} right={`${awayStats.possession}%`} showValues={showStats} />
+        <StatComparison label="Shots faced" left={String(homeStats.shotsAgainst)} right={String(awayStats.shotsAgainst)} showValues={showStats} />
+        <StatComparison label="Corners faced" left={String(homeStats.cornersAgainst)} right={String(awayStats.cornersAgainst)} showValues={showStats} />
       </div>
+      <PreviousPlayerRatings match={match} />
     </section>
   );
 }
@@ -1065,10 +1067,48 @@ function TeamCompact({
 }
 
 function TeamAvatar({ code, logoUrl }: { code: string; logoUrl?: string }) {
+  const flagUrl = flagUrlForCode(code);
   return logoUrl ? (
     <img alt="" className="team-avatar" src={logoUrl} />
+  ) : flagUrl ? (
+    <img alt="" className="team-avatar flag" src={flagUrl} />
   ) : (
     <span className="team-avatar fallback">{code.slice(0, 3)}</span>
+  );
+}
+
+function PreviousPlayerRatings({ match }: { match: MatchSnapshot }) {
+  const ratedPlayers = Object.entries(match.ratings)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6);
+
+  if (!ratedPlayers.length) {
+    return (
+      <div className="previous-ratings is-empty">
+        <strong>Previous match lineup</strong>
+        <span>Unavailable from the connected feed for this fixture.</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="previous-ratings">
+      <div className="previous-ratings-heading">
+        <strong>Previous match lineup</strong>
+        <span>Ratings from connected data</span>
+      </div>
+      <div className="previous-player-grid">
+        {ratedPlayers.map(([player, rating]) => (
+          <div className="previous-player" key={player}>
+            <span className="player-photo">{player.slice(0, 1)}</span>
+            <div>
+              <strong>{player}</strong>
+              <span>Rating {rating.toFixed(1)}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1208,12 +1248,34 @@ function LineupSide({ lineup, side }: { lineup?: TeamLineup; side: "home" | "awa
   );
 }
 
-function StatComparison({ label, left, right }: { label: string; left: string; right: string }) {
+function StatComparison({
+  label,
+  left,
+  right,
+  showValues = true,
+}: {
+  label: string;
+  left: string;
+  right: string;
+  showValues?: boolean;
+}) {
+  const leftNumber = numericStat(left);
+  const rightNumber = numericStat(right);
+  const total = leftNumber + rightNumber;
+  const leftShare = total > 0 ? Math.max(4, Math.min(96, (leftNumber / total) * 100)) : 50;
+
   return (
-    <div className="stat-comparison">
-      <strong>{left}</strong>
-      <span>{label}</span>
-      <strong>{right}</strong>
+    <div className={`stat-comparison ${showValues ? "" : "is-pending"}`}>
+      <div className="stat-head">
+        <span>{showValues ? left : ""}</span>
+        <strong>{label}</strong>
+        <span>{showValues ? right : ""}</span>
+      </div>
+      <div className="stat-track" aria-hidden="true">
+        <i className="home-stat" style={{ width: showValues ? `${leftShare}%` : "50%" }} />
+        <i className="away-stat" style={{ width: showValues ? `${100 - leftShare}%` : "50%" }} />
+      </div>
+      {!showValues && <small>Prematch</small>}
     </div>
   );
 }
@@ -1469,12 +1531,35 @@ function impliedProbability(oddsBps: number): number {
 
 function formatProbability(oddsBps: number): string {
   if (!oddsBps) return "--";
-  return `${Math.round(impliedProbability(oddsBps))}c`;
+  return `${Math.round(impliedProbability(oddsBps))}¢`;
 }
 
 function formatNoProbability(oddsBps: number): string {
   if (!oddsBps) return "--";
-  return `${Math.max(1, 100 - Math.round(impliedProbability(oddsBps)))}c`;
+  return `${Math.max(1, 100 - Math.round(impliedProbability(oddsBps)))}¢`;
+}
+
+function numericStat(value: string): number {
+  const parsed = Number(value.replace(/[^\d.]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function flagUrlForCode(code: string): string {
+  const normalized = code.toUpperCase();
+  const flagCodes: Record<string, string> = {
+    ARG: "ar",
+    BRA: "br",
+    ENG: "gb-eng",
+    FRA: "fr",
+    JPN: "jp",
+    MEX: "mx",
+    NLD: "nl",
+    POR: "pt",
+    SPA: "es",
+    USA: "us",
+  };
+  const flagCode = flagCodes[normalized];
+  return flagCode ? `https://flagcdn.com/${flagCode}.svg` : "";
 }
 
 function marketQuestion(market: MarketDefinition, match: MatchSnapshot): string {
