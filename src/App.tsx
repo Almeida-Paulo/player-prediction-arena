@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import worldCupLogo from "../assets/fifa-world-cup-2026-logo-footylogos.png";
+import worldCupLogo from "../assets/fifa-world-cup-2026-logo-footylogos.svg";
 import predictionLogo from "../assets/Prediction-Arena-logo.png";
 import { skillBadges } from "../shared/badges";
 import { cards as cardCatalog, starterPackPool } from "../shared/cards";
@@ -751,7 +751,7 @@ function OddsStrip({ odds }: { odds: MatchSnapshot["odds"] }) {
     <div className="stableprice-strip">
       <div>
         <span>StablePrice odds</span>
-        <strong>{visibleOdds.length ? "TXODDS consensus" : "Awaiting odds snapshot"}</strong>
+        <strong>{visibleOdds.length ? "TXODDS consensus" : "Waiting for odds"}</strong>
       </div>
       {visibleOdds.length ? (
         <div className="odds-pill-list">
@@ -764,7 +764,7 @@ function OddsStrip({ odds }: { odds: MatchSnapshot["odds"] }) {
           ))}
         </div>
       ) : (
-        <p>Odds appear here when `/api/odds/snapshot` returns markets for this fixture.</p>
+        <p>Pre-match consensus odds appear here when TXODDS returns markets for this fixture.</p>
       )}
     </div>
   );
@@ -1583,9 +1583,9 @@ function formatNoProbability(oddsBps: number): string {
 }
 
 function formatOdd(odd: NonNullable<MatchSnapshot["odds"]>[number]): string {
+  if (odd.impliedProbability) return `${(odd.impliedProbability * 100).toFixed(1)}%`;
   if (odd.decimal) return `${odd.decimal.toFixed(2)}x`;
   if (odd.american) return odd.american > 0 ? `+${odd.american}` : String(odd.american);
-  if (odd.impliedProbability) return `${Math.round(odd.impliedProbability * 100)}%`;
   return "Live";
 }
 

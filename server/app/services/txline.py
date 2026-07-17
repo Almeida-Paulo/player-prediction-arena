@@ -130,7 +130,7 @@ async def hydrate_odds_snapshots(
         if not fixture_id:
             continue
         odds_items = await fetch_odds_snapshot(client, base, settings, guest_jwt, fixture_id)
-        mapped_odds = [mapped for item in odds_items if (mapped := map_txline_odds(item))]
+        mapped_odds = [mapped for item in odds_items for mapped in map_txline_odds(item)]
         match["odds"] = mapped_odds[:24]
 
 
@@ -174,7 +174,7 @@ def map_txline_fixture(item: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def map_txline_odds(item: dict[str, Any]) -> dict[str, Any] | None:
+def map_txline_odds(item: dict[str, Any]) -> list[dict[str, Any]]:
     market = str(
         first_value(
             item,
@@ -189,7 +189,7 @@ def map_txline_odds(item: dict[str, Any]) -> dict[str, Any] | None:
         )
         or ""
     )
-    selection = str(
+    scalar_selection = str(
         first_value(
             item,
             "Selection",
@@ -203,6 +203,42 @@ def map_txline_odds(item: dict[str, Any]) -> dict[str, Any] | None:
         )
         or ""
     )
+    price_names = first_value(item, "PriceNames", "priceNames")
+    prices = first_value(item, "Prices", "prices")
+    pcts = first_value(item, "Pct", "pct", "Pcts", "pcts")
+    if isinstance(price_names, list) or isinstance(prices, list) or isinstance(pcts, list):
+        entry_count = max(
+            list_length(price_names),
+            list_length(prices),
+            list_length(pcts),
+            1,
+        )
+        entries: list[dict[str, Any]] = []
+        for index in range(entry_count):
+            selection = str(list_value(price_names, index) or scalar_selection or f"Selection {index + 1}")
+            decimal = normalize_decimal_price(list_value(prices, index))
+            implied = parse_probability(list_value(pcts, index))
+            if not any([market, selection, decimal, implied]):
+                continue
+            odds_id = str(
+                first_value(item, "Id", "id", "OddsId", "oddsId", "MarketId", "marketId", "MessageId", "messageId")
+                or f"{market}:{selection}:{index}"
+            )
+            entries.append(
+                {
+                    "id": f"{odds_id}:{index}",
+                    "market": market or "Market",
+                    "selection": selection,
+                    "decimal": decimal,
+                    "impliedProbability": implied,
+                    "status": first_value(item, "Status", "status", "Suspended", "suspended", "GameState", "gameState"),
+                    "updatedAt": first_value(item, "Ts", "ts", "Timestamp", "timestamp", "UpdatedAt", "updatedAt"),
+                    "source": "txline",
+                }
+            )
+        return entries
+
+    selection = scalar_selection
     decimal = safe_float(
         first_value(
             item,
@@ -234,20 +270,22 @@ def map_txline_odds(item: dict[str, Any]) -> dict[str, Any] | None:
         implied = 1 / decimal
 
     if not any([market, selection, decimal, american, implied]):
-        return None
+        return []
 
     odds_id = str(first_value(item, "Id", "id", "OddsId", "oddsId", "MarketId", "marketId") or f"{market}:{selection}")
-    return {
-        "id": odds_id,
-        "market": market or "Market",
-        "selection": selection or "Selection",
-        "decimal": decimal,
-        "american": american,
-        "impliedProbability": implied,
-        "status": first_value(item, "Status", "status", "Suspended", "suspended"),
-        "updatedAt": first_value(item, "Ts", "ts", "Timestamp", "timestamp", "UpdatedAt", "updatedAt"),
-        "source": "txline",
-    }
+    return [
+        {
+            "id": odds_id,
+            "market": market or "Market",
+            "selection": selection or "Selection",
+            "decimal": decimal,
+            "american": american,
+            "impliedProbability": implied,
+            "status": first_value(item, "Status", "status", "Suspended", "suspended"),
+            "updatedAt": first_value(item, "Ts", "ts", "Timestamp", "timestamp", "UpdatedAt", "updatedAt"),
+            "source": "txline",
+        }
+    ]
 
 
 def first_value(item: dict[str, Any], *keys: str) -> Any:
@@ -349,6 +387,36 @@ def safe_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def list_length(value: Any) -> int:
+    return len(value) if isinstance(value, list) else 0
+
+
+def list_value(value: Any, index: int) -> Any:
+    if not isinstance(value, list) or index >= len(value):
+        return None
+    return value[index]
+
+
+def parse_probability(value: Any) -> float | None:
+    if isinstance(value, str) and value.strip().upper() == "NA":
+        return None
+    parsed = safe_float(value)
+    if parsed is None:
+        return None
+    return parsed / 100 if parsed > 1 else parsed
+
+
+def normalize_decimal_price(value: Any) -> float | None:
+    parsed = safe_float(value)
+    if parsed is None or parsed <= 0:
+        return None
+    if parsed >= 1000:
+        return parsed / 1000
+    if parsed >= 100:
+        return parsed / 100
+    return parsed
 
 
 def is_world_cup_fixture(item: dict[str, Any]) -> bool:

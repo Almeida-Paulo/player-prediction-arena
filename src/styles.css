@@ -3,7 +3,7 @@
 :root {
   --bg: #ffffff;
   --surface: #ffffff;
-  --surface-soft: #f8fafb;
+  --surface-soft: #ffffff;
   --surface-hover: #f4f7f6;
   --ink: #111314;
   --muted: #6d747c;
@@ -74,7 +74,7 @@ p {
 
 .site-header {
   background: var(--surface);
-  border-bottom: 1px solid var(--line-strong);
+  border-bottom: 0.7px solid var(--line-strong);
   position: sticky;
   top: 0;
   z-index: 20;
@@ -166,11 +166,11 @@ p {
   align-items: center;
   border-radius: 7px;
   display: inline-flex;
-  font-weight: 780;
+  font-weight: 650;
   gap: 8px;
   justify-content: center;
-  min-height: 40px;
-  padding: 0 15px;
+  min-height: 36px;
+  padding: 0 12px;
   white-space: nowrap;
 }
 
@@ -178,14 +178,14 @@ p {
   background: var(--surface);
   border: 1px solid var(--line-strong);
   color: var(--accent-dark);
-  font-size: 20px;
+  font-size: 17px;
 }
 
 .signup-button {
   background: var(--accent);
   border: 1px solid var(--accent);
   color: #fff;
-  font-size: 20px;
+  font-size: 17px;
 }
 
 .login-button:hover,
@@ -203,7 +203,7 @@ p {
   background: var(--accent);
   border: 1px solid var(--accent);
   color: #fff;
-  height: 42px;
+  height: 38px;
   padding: 0 12px;
 }
 
@@ -265,8 +265,8 @@ p {
   color: var(--ink);
   display: inline-flex;
   flex: 0 0 auto;
-  font-size: 20px;
-  font-weight: 780;
+  font-size: 18px;
+  font-weight: 660;
   gap: 7px;
   line-height: 1;
   padding: 0;
@@ -284,7 +284,7 @@ p {
   color: #6b4f12;
   display: flex;
   gap: 10px;
-  margin: 16px auto 0;
+  margin: 14px auto 0;
   max-width: 1460px;
   padding: 12px 14px;
 }
@@ -293,7 +293,7 @@ p {
   display: grid;
   gap: 28px;
   grid-template-columns: minmax(0, 1fr) 440px;
-  margin: 34px auto 56px;
+  margin: 30px auto 56px;
   max-width: 1460px;
   padding: 0 32px;
 }
@@ -317,7 +317,7 @@ p {
 .prediction-card,
 .empty-state {
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 0.8px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
 }
@@ -363,9 +363,9 @@ p {
 
 .market-icon {
   align-items: center;
-  background: #050706;
+  background: #ffffff;
+  border: 0.8px solid var(--line);
   border-radius: 12px;
-  color: #fff;
   display: inline-flex;
   height: 52px;
   justify-content: center;
@@ -375,10 +375,10 @@ p {
 
 .market-icon img {
   display: block;
-  height: 50px;
+  height: 46px;
   object-fit: contain;
   object-position: center;
-  width: 50px;
+  width: auto;
 }
 
 .market-type span {
@@ -970,7 +970,7 @@ p {
 }
 
 .away-stat {
-  background: #3657ff;
+  background: #ff5a57;
 }
 
 .stat-comparison.is-pending .stat-track {
