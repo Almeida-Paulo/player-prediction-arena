@@ -24,34 +24,34 @@ async def fetch_txline_matches(settings: Settings) -> list[dict[str, Any]] | Non
                 if not guest_jwt:
                     return None
                 response = await fetch_fixtures_snapshot(client, base, settings, guest_jwt)
-    except httpx.HTTPError:
+
+            if response.status_code >= 400:
+                return None
+
+            try:
+                payload = response.json()
+            except ValueError:
+                return None
+
+            if isinstance(payload, list):
+                items = payload
+            elif isinstance(payload, dict):
+                items = payload.get("data", [])
+            else:
+                items = []
+
+            mapped_pairs = [
+                (item, mapped)
+                for item in items
+                if isinstance(item, dict) and (mapped := map_txline_fixture(item))
+            ]
+            world_cup_matches = [mapped for item, mapped in mapped_pairs if is_world_cup_fixture(item)]
+            matches = world_cup_matches or [mapped for _, mapped in mapped_pairs]
+            if matches:
+                await hydrate_odds_snapshots(client, base, settings, guest_jwt, matches)
+            return matches or None
+    except (httpx.HTTPError, RuntimeError):
         return None
-
-    if response.status_code >= 400:
-        return None
-
-    try:
-        payload = response.json()
-    except ValueError:
-        return None
-
-    if isinstance(payload, list):
-        items = payload
-    elif isinstance(payload, dict):
-        items = payload.get("data", [])
-    else:
-        items = []
-
-    mapped_pairs = [
-        (item, mapped)
-        for item in items
-        if isinstance(item, dict) and (mapped := map_txline_fixture(item))
-    ]
-    world_cup_matches = [mapped for item, mapped in mapped_pairs if is_world_cup_fixture(item)]
-    matches = world_cup_matches or [mapped for _, mapped in mapped_pairs]
-    if matches:
-        await hydrate_odds_snapshots(client, base, settings, guest_jwt, matches)
-    return matches or None
 
 
 async def start_guest_session(client: httpx.AsyncClient, base: str) -> str | None:
@@ -126,7 +126,10 @@ async def hydrate_odds_snapshots(
     matches: list[dict[str, Any]],
 ) -> None:
     for match in matches[:8]:
-        odds_items = await fetch_odds_snapshot(client, base, settings, guest_jwt, str(match["id"]))
+        fixture_id = str(match.get("id") or "")
+        if not fixture_id:
+            continue
+        odds_items = await fetch_odds_snapshot(client, base, settings, guest_jwt, fixture_id)
         mapped_odds = [mapped for item in odds_items if (mapped := map_txline_odds(item))]
         match["odds"] = mapped_odds[:24]
 

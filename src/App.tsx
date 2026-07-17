@@ -1428,7 +1428,7 @@ function FeedNotice({ message }: { message: string }) {
   return (
     <div className="feed-notice">
       <ShieldCheck size={18} />
-      <span>{message}. Check TXLine guest JWT/API token and restart the FastAPI service.</span>
+      <span>{message}. Check the FastAPI service logs; if it is a 401 or 503, verify the TXLine network, guest JWT, and API token.</span>
     </div>
   );
 }
