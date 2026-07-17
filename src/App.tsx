@@ -43,6 +43,12 @@ import type {
   TeamLineup,
   UserProgress,
 } from "../shared/types";
+import {
+  getPlatformMarketActivity,
+  rankPlatformUsersBy,
+  type PlatformHistoryPoint,
+  type PlatformUser,
+} from "./platform-activity";
 import { getCatalog, getMatches, settlePositionApi } from "./services/api";
 
 interface AppState {
@@ -69,6 +75,7 @@ interface MarketActivity {
   positions: number;
   bettors: number;
   wonCents: number;
+  history: PlatformHistoryPoint[];
 }
 
 const STORAGE_KEY = "player-prediction-arena-ts";
@@ -191,7 +198,7 @@ export function App() {
   const maxBonusBps = selectedCards.reduce((sum, card) => sum + card.bonusBps, 0);
   const maxBonus = Math.floor((potentialProfit * maxBonusBps) / 10000);
   const featuredActivity =
-    selectedMatch && selectedMarket ? getMarketActivity(state, selectedMatch.id, selectedMarket.id) : emptyActivity();
+    selectedMatch && selectedMarket ? getMarketActivity(state, selectedMatch, selectedMarket) : emptyActivity();
   const trendingItems = useMemo(() => rankTrendingMarkets(marketItems, state).slice(0, 3), [marketItems, state]);
   const highestVolumeItems = useMemo(() => rankVolumeMarkets(marketItems, state).slice(0, 3), [marketItems, state]);
 
@@ -449,7 +456,7 @@ export function App() {
                 <div className="prediction-grid">
                   {marketItems.map((item) => (
                     <MarketCard
-                      activity={getMarketActivity(state, item.match.id, item.market.id)}
+                      activity={getMarketActivity(state, item.match, item.market)}
                       isSelected={item.match.id === selectedMatch?.id && item.market.id === selectedMarket?.id}
                       item={item}
                       key={`${item.match.id}-${item.market.id}`}
@@ -699,17 +706,20 @@ function PositionShareChart({
   yesLabel: string;
   yesPercent: number;
 }) {
-  const yesLine = flatLinePoints(yesPercent);
-  const noLine = flatLinePoints(noPercent);
+  const chartHistory = activity.history.length
+    ? [...activity.history, { label: "Now", no: noPercent, volumeCents: activity.volumeCents, yes: yesPercent }]
+    : [];
+  const yesLine = chartHistory.length ? historyLinePoints(chartHistory, "yes") : flatLinePoints(yesPercent);
+  const noLine = chartHistory.length ? historyLinePoints(chartHistory, "no") : flatLinePoints(noPercent);
 
   return (
     <div className="position-chart-card">
       <div className="chart-heading">
         <div>
-          <span>Live implied probability</span>
+          <span>Prediction Arena market</span>
           <strong>{Math.round(yesPercent)}%</strong>
         </div>
-        <small>{activity.positions ? `${activity.positions} platform positions` : "No positions yet"}</small>
+        <small>{activity.positions.toLocaleString("en-US")} platform positions</small>
       </div>
       <svg className="line-chart" role="img" viewBox="0 0 320 176" aria-label="Current market probability line">
         <line className="chart-rule" x1="0" x2="320" y1="32" y2="32" />
@@ -741,7 +751,7 @@ function PositionShareChart({
         </span>
         <strong>{noPercent.toFixed(1)}%</strong>
       </div>
-      <p className="chart-note">Historical odds line appears when the connected feed exposes price history.</p>
+      <p className="chart-note">Last 13 platform market updates.</p>
     </div>
   );
 }
@@ -914,7 +924,7 @@ function MarketInsightPanel({
   type: "trending" | "volume";
   onSelect: (item: MarketItem) => void;
 }) {
-  const hasActivity = items.some((item) => getMarketActivity(state, item.match.id, item.market.id).positions > 0);
+  const hasActivity = items.some((item) => getMarketActivity(state, item.match, item.market).positions > 0);
 
   return (
     <section className="insight-panel">
@@ -925,7 +935,7 @@ function MarketInsightPanel({
       {!hasActivity && <p className="panel-note">{emptyLabel}</p>}
       <div className="insight-list">
         {items.map((item) => {
-          const activity = getMarketActivity(state, item.match.id, item.market.id);
+          const activity = getMarketActivity(state, item.match, item.market);
           const probability = impliedProbability(item.market.oddsBps);
           return (
             <button className="insight-row" key={`${title}-${item.match.id}-${item.market.id}`} type="button" onClick={() => onSelect(item)}>
@@ -1044,9 +1054,24 @@ function AccountScreen({
           <div className="account-stack">
             <SectionTitle eyebrow="Classification" title="Leaderboard" />
             <div className="leaderboard-grid">
-              <LeaderboardTable label="Most predictions" metric={`${state.progress.totalBets}`} stats={stats} />
-              <LeaderboardTable label="Total value won" metric={formatCents(stats.totalWonCents)} stats={stats} />
-              <LeaderboardTable label="Correct predictions" metric={`${stats.correctPredictions}`} stats={stats} />
+              <LeaderboardTable
+                currentMetric={`${state.progress.totalBets}`}
+                label="Most predictions"
+                metricKey="predictions"
+                stats={stats}
+              />
+              <LeaderboardTable
+                currentMetric={formatCents(stats.totalWonCents)}
+                label="Total value won"
+                metricKey="wonCents"
+                stats={stats}
+              />
+              <LeaderboardTable
+                currentMetric={`${stats.correctPredictions}`}
+                label="Correct predictions"
+                metricKey="correctPredictions"
+                stats={stats}
+              />
             </div>
           </div>
         )}
@@ -1400,19 +1425,59 @@ function RewardHistory({ positions, settled }: { positions: PositionInput[]; set
   );
 }
 
-function LeaderboardTable({ label, metric, stats }: { label: string; metric: string; stats: ReturnType<typeof getAccountStats> }) {
+function LeaderboardTable({
+  currentMetric,
+  label,
+  metricKey,
+  stats,
+}: {
+  currentMetric: string;
+  label: string;
+  metricKey: "predictions" | "wonCents" | "correctPredictions";
+  stats: ReturnType<typeof getAccountStats>;
+}) {
+  const leaders = rankPlatformUsersBy(metricKey).slice(0, 4);
+
   return (
     <div className="account-card leaderboard-card">
       <h3>{label}</h3>
-      <div className="leaderboard-row">
-        <span>1</span>
+      {leaders.map((user, index) => (
+        <LeaderboardRow key={`${label}-${user.id}`} metricKey={metricKey} rank={index + 1} user={user} />
+      ))}
+      <div className="leaderboard-row is-you">
+        <span>{leaders.length + 1}</span>
         <User size={18} />
-        <strong>You</strong>
-        <em>{metric}</em>
+        <strong>
+          You
+          <small>Connected wallet</small>
+        </strong>
+        <em>{currentMetric}</em>
       </div>
       <small>
         Demo stats: {stats.correctPredictions} correct, {formatCents(stats.totalWonCents)} won.
       </small>
+    </div>
+  );
+}
+
+function LeaderboardRow({
+  metricKey,
+  rank,
+  user,
+}: {
+  metricKey: "predictions" | "wonCents" | "correctPredictions";
+  rank: number;
+  user: PlatformUser;
+}) {
+  return (
+    <div className="leaderboard-row">
+      <span>{rank}</span>
+      <User size={18} />
+      <strong>
+        {user.name}
+        <small>{user.wallet}</small>
+      </strong>
+      <em>{formatLeaderboardMetric(user, metricKey)}</em>
     </div>
   );
 }
@@ -1485,8 +1550,8 @@ function pickLaunchMatch(matches: MatchSnapshot[]): MatchSnapshot | undefined {
 
 function rankTrendingMarkets(items: MarketItem[], state: AppState): MarketItem[] {
   const ranked = [...items].sort((a, b) => {
-    const activityA = getMarketActivity(state, a.match.id, a.market.id);
-    const activityB = getMarketActivity(state, b.match.id, b.market.id);
+    const activityA = getMarketActivity(state, a.match, a.market);
+    const activityB = getMarketActivity(state, b.match, b.market);
     return activityB.positions - activityA.positions || impliedProbability(b.market.oddsBps) - impliedProbability(a.market.oddsBps);
   });
   return ranked;
@@ -1494,27 +1559,42 @@ function rankTrendingMarkets(items: MarketItem[], state: AppState): MarketItem[]
 
 function rankVolumeMarkets(items: MarketItem[], state: AppState): MarketItem[] {
   const ranked = [...items].sort((a, b) => {
-    const activityA = getMarketActivity(state, a.match.id, a.market.id);
-    const activityB = getMarketActivity(state, b.match.id, b.market.id);
+    const activityA = getMarketActivity(state, a.match, a.market);
+    const activityB = getMarketActivity(state, b.match, b.market);
     return activityB.volumeCents - activityA.volumeCents || impliedProbability(b.market.oddsBps) - impliedProbability(a.market.oddsBps);
   });
   return ranked;
 }
 
-function getMarketActivity(state: AppState, matchId: string, marketId: string): MarketActivity {
-  const open = state.positions.filter((position) => position.matchId === matchId && position.marketId === marketId);
-  const settled = state.settled.filter((position) => position.matchId === matchId && position.marketId === marketId);
-  const positions = open.length + settled.length;
+function getMarketActivity(state: AppState, match: MatchSnapshot, market: MarketDefinition): MarketActivity {
+  const platform = getPlatformMarketActivity(match, market);
+  const open = state.positions.filter((position) => position.matchId === match.id && position.marketId === market.id);
+  const settled = state.settled.filter((position) => position.matchId === match.id && position.marketId === market.id);
+  const userPositions = open.length + settled.length;
+  const userVolumeCents = [...open, ...settled].reduce((sum, position) => sum + position.stakeCents, 0);
+  const userWonCents = settled.reduce(
+    (sum, position) => sum + (position.won ? position.netProfitCents + position.bonusCents : 0),
+    0,
+  );
+  const history = platform.history.map((point) => ({
+    ...point,
+    volumeCents:
+      platform.volumeCents > 0
+        ? point.volumeCents + Math.round(userVolumeCents * (point.volumeCents / platform.volumeCents))
+        : point.volumeCents + userVolumeCents,
+  }));
+
   return {
-    volumeCents: [...open, ...settled].reduce((sum, position) => sum + position.stakeCents, 0),
-    positions,
-    bettors: positions > 0 && state.connected ? 1 : 0,
-    wonCents: settled.reduce((sum, position) => sum + (position.won ? position.netProfitCents + position.bonusCents : 0), 0),
+    bettors: platform.bettors + (userPositions > 0 && state.connected ? 1 : 0),
+    history,
+    positions: platform.positions + userPositions,
+    volumeCents: platform.volumeCents + userVolumeCents,
+    wonCents: platform.wonCents + userWonCents,
   };
 }
 
 function emptyActivity(): MarketActivity {
-  return { bettors: 0, positions: 0, volumeCents: 0, wonCents: 0 };
+  return { bettors: 0, history: [], positions: 0, volumeCents: 0, wonCents: 0 };
 }
 
 function getAccountStats(state: AppState) {
@@ -1563,6 +1643,16 @@ function flatLinePoints(percent: number): string {
   return [20, 76, 132, 188, 244, 300].map((x) => `${x},${y}`).join(" ");
 }
 
+function historyLinePoints(history: PlatformHistoryPoint[], key: "yes" | "no"): string {
+  if (history.length <= 1) return flatLinePoints(history[0]?.[key] ?? 50);
+  return history
+    .map((point, index) => {
+      const x = 20 + (280 * index) / (history.length - 1);
+      return `${x.toFixed(1)},${chartY(point[key]).toFixed(1)}`;
+    })
+    .join(" ");
+}
+
 function formatCents(cents: number): string {
   return (cents / 100).toLocaleString("en-US", {
     currency: "USD",
@@ -1575,6 +1665,14 @@ function formatSignedCents(cents: number): string {
   if (cents > 0) return `+${absolute}`;
   if (cents < 0) return `-${absolute}`;
   return absolute;
+}
+
+function formatLeaderboardMetric(
+  user: PlatformUser,
+  metricKey: "predictions" | "wonCents" | "correctPredictions",
+): string {
+  if (metricKey === "wonCents") return formatCents(user.wonCents);
+  return user[metricKey].toLocaleString("en-US");
 }
 
 function formatBps(bps: number): string {

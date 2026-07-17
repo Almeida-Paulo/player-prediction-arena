@@ -1857,6 +1857,15 @@ p {
   padding: 11px;
 }
 
+.leaderboard-row + .leaderboard-row {
+  margin-top: 8px;
+}
+
+.leaderboard-row.is-you {
+  background: #ffffff;
+  border-color: rgba(0, 174, 102, 0.32);
+}
+
 .leaderboard-row span {
   color: var(--muted);
   font-weight: 850;
@@ -1864,6 +1873,18 @@ p {
 
 .leaderboard-row strong {
   flex: 1;
+  min-width: 0;
+}
+
+.leaderboard-row strong small {
+  color: var(--faint);
+  display: block;
+  font-size: 11px;
+  font-weight: 650;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .leaderboard-row em {
