@@ -118,6 +118,7 @@ export function App() {
   const [loadError, setLoadError] = useState("");
   const [activeView, setActiveView] = useState<AccountView>("home");
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [cardPickerOpen, setCardPickerOpen] = useState(false);
 
   useEffect(() => {
@@ -365,10 +366,20 @@ export function App() {
             <span>Prediction Arena</span>
           </button>
 
-          <label className="search-box">
+          <label className={`search-box ${searchOpen ? "is-open" : ""}`}>
             <Search size={20} />
             <input placeholder="Search markets, teams..." type="search" />
           </label>
+
+          <button
+            aria-expanded={searchOpen}
+            aria-label="Search markets"
+            className="search-toggle"
+            type="button"
+            onClick={() => setSearchOpen((value) => !value)}
+          >
+            <Search size={19} />
+          </button>
 
           {state.connected ? (
             <div className="user-menu-wrap">
@@ -448,6 +459,12 @@ export function App() {
               </div>
             )}
 
+            {selectedMatch && (
+              <div className="mobile-lineup-wrapper">
+                <LineupPreview match={selectedMatch} />
+              </div>
+            )}
+
             <section className="market-grid-section">
               <SectionTitle
                 eyebrow={isLoading ? "Loading fixtures" : `${matches.length} fixtures`}
@@ -476,7 +493,11 @@ export function App() {
           </section>
 
           <aside className="insight-column" aria-label="Match insights">
-            {selectedMatch && <LineupPreview match={selectedMatch} />}
+            {selectedMatch && (
+              <div className="desktop-lineup-wrapper">
+                <LineupPreview match={selectedMatch} />
+              </div>
+            )}
             <MarketInsightPanel
               emptyLabel="Activity appears after the first platform position."
               items={trendingItems}

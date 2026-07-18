@@ -148,6 +148,18 @@ p {
   color: #a6abb1;
 }
 
+.search-toggle {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  color: var(--ink);
+  display: none;
+  height: 38px;
+  justify-content: center;
+  width: 38px;
+}
+
 .auth-actions,
 .user-menu-wrap {
   justify-self: end;
@@ -307,6 +319,14 @@ p {
 
 .insight-column {
   align-content: start;
+}
+
+.mobile-lineup-wrapper {
+  display: none;
+}
+
+.desktop-lineup-wrapper {
+  display: block;
 }
 
 .featured-market-card,
@@ -2038,6 +2058,10 @@ p {
     grid-column: 1 / -1;
   }
 
+  .desktop-lineup-wrapper {
+    grid-column: 1 / -1;
+  }
+
   .account-nav {
     display: flex;
     overflow-x: auto;
@@ -2055,33 +2079,67 @@ p {
 
 @media (max-width: 760px) {
   .header-main {
-    gap: 14px;
-    padding: 12px 14px;
+    gap: 10px;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    min-height: auto;
+    padding: 10px 12px 8px;
   }
 
   .brand-lockup span {
-    font-size: 26px;
+    font-size: 24px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .brand-logo {
-    height: 30px;
-    width: 30px;
+    height: 29px;
+    width: 29px;
+  }
+
+  .search-toggle {
+    display: inline-flex;
+  }
+
+  .search-box {
+    display: none;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    height: 44px;
+    justify-self: stretch;
+    width: 100%;
+  }
+
+  .search-box.is-open {
+    display: flex;
+  }
+
+  .search-box input {
+    font-size: 16px;
   }
 
   .auth-actions {
     gap: 6px;
   }
 
+  .auth-actions .signup-button {
+    display: none;
+  }
+
   .login-button,
-  .signup-button {
-    font-size: 16px;
-    min-height: 36px;
-    padding: 0 11px;
+  .signup-button,
+  .user-button {
+    font-size: 15px;
+    min-height: 38px;
+    padding: 0 12px;
   }
 
   .category-nav {
-    gap: 20px;
-    padding: 0 14px 12px;
+    gap: 0;
+    padding: 0 12px 10px;
+  }
+
+  .category-nav button:not(.is-active) {
+    display: none;
   }
 
   .category-nav button {
@@ -2090,16 +2148,174 @@ p {
 
   .arena-layout,
   .account-layout {
-    margin-top: 16px;
-    padding: 0 10px;
+    margin-top: 12px;
+    padding: 0 12px;
+  }
+
+  .primary-column,
+  .insight-column,
+  .account-stack {
+    gap: 16px;
   }
 
   .featured-market-card {
+    gap: 18px;
+    min-height: auto;
     padding: 16px;
   }
 
+  .featured-toolbar {
+    gap: 12px;
+  }
+
+  .market-icon {
+    height: 44px;
+    width: 44px;
+  }
+
+  .market-icon img {
+    height: 38px;
+  }
+
+  .market-type {
+    gap: 10px;
+  }
+
+  .market-type > div > span {
+    font-size: 13px;
+  }
+
+  .market-type > div > strong {
+    font-size: 16px;
+  }
+
+  .icon-actions {
+    justify-content: space-between;
+    width: 100%;
+  }
+
   .featured-copy h1 {
-    font-size: 34px;
+    font-size: 31px;
+    line-height: 1;
+    margin-bottom: 18px;
+  }
+
+  .market-status-row {
+    font-size: 13px;
+    gap: 7px;
+    margin-bottom: 12px;
+  }
+
+  .market-status-row span {
+    padding: 5px 8px;
+  }
+
+  .outcome-stack {
+    margin-bottom: 18px;
+  }
+
+  .outcome-row {
+    gap: 10px;
+    grid-template-columns: 38px minmax(0, 1fr) 82px;
+    min-height: 62px;
+  }
+
+  .outcome-row strong {
+    font-size: 17px;
+  }
+
+  .outcome-button {
+    font-size: 16px;
+    min-height: 42px;
+    min-width: 82px;
+  }
+
+  .stableprice-strip {
+    gap: 10px;
+    grid-template-columns: 1fr;
+    margin: -2px 0 18px;
+    padding: 11px;
+  }
+
+  .odds-brand {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+  }
+
+  .result-odds-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .result-odd {
+    grid-template-columns: 1fr;
+    min-height: 58px;
+    padding: 8px 6px;
+    text-align: center;
+  }
+
+  .result-odd small {
+    grid-row: auto;
+  }
+
+  .market-meta-grid {
+    display: none;
+  }
+
+  .position-chart-card {
+    gap: 10px;
+    min-height: auto;
+    padding: 14px;
+  }
+
+  .line-chart {
+    height: 148px;
+  }
+
+  .chart-x-axis span,
+  .chart-y-label {
+    font-size: 11px;
+  }
+
+  .legend-row span {
+    font-size: 14px;
+  }
+
+  .legend-row strong {
+    font-size: 16px;
+  }
+
+  .trade-panel {
+    gap: 14px;
+    padding: 14px;
+  }
+
+  .ticket-metrics .metric:nth-child(3) {
+    display: none;
+  }
+
+  .metric {
+    padding: 11px;
+  }
+
+  .metric span {
+    font-size: 12px;
+  }
+
+  .metric strong {
+    font-size: 15px;
+  }
+
+  .card-loadout-button {
+    min-height: 46px;
+  }
+
+  .mobile-lineup-wrapper {
+    display: block;
+  }
+
+  .desktop-lineup-wrapper {
+    display: none;
   }
 
   .market-meta-grid,
@@ -2117,12 +2333,58 @@ p {
     grid-template-columns: 1fr;
   }
 
-  .account-layout {
-    padding: 0 10px;
+  .ticket-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .result-odds-grid {
-    grid-template-columns: 1fr;
+  .account-layout {
+    padding: 0 12px;
+  }
+
+  .lineup-panel,
+  .insight-panel {
+    padding: 13px;
+  }
+
+  .team-compact strong {
+    font-size: 17px;
+  }
+
+  .lineup-subhead {
+    font-size: 13px;
+  }
+
+  .pitch-surface {
+    min-height: 228px;
+  }
+
+  .lineup-empty p {
+    display: none;
+  }
+
+  .prediction-grid {
+    gap: 14px;
+  }
+
+  .prediction-card {
+    gap: 14px;
+    min-height: 162px;
+    padding: 13px;
+  }
+
+  .card-title-row strong {
+    font-size: 16px;
+  }
+
+  .mini-outcomes div {
+    grid-template-columns: minmax(0, 1fr) 54px 46px;
+  }
+
+  .mini-outcomes span,
+  .card-footer,
+  .insight-row span,
+  .insight-row small {
+    font-size: 13px;
   }
 
   .card-modal-backdrop {
