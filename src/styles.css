@@ -370,7 +370,7 @@ p {
 
 .fixture-results-strip {
   display: grid;
-  gap: 12px;
+  gap: 8px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -379,13 +379,19 @@ p {
 }
 
 .fixture-result-card {
-  background: #fff;
+  align-items: center;
+  background: #ffffff;
   cursor: pointer;
   display: grid;
-  gap: 7px;
-  min-height: 118px;
-  padding: 13px 14px;
+  gap: 10px;
+  grid-template-columns: 54px minmax(0, 1fr) 54px;
+  min-height: 72px;
+  padding: 7px 11px;
   text-align: center;
+}
+
+.fixture-result-card.is-played {
+  background: linear-gradient(90deg, #eefaf4 0%, #ffffff 34%, #ffffff 66%, #eefaf4 100%);
 }
 
 .fixture-result-card.is-selected {
@@ -393,58 +399,96 @@ p {
   box-shadow: 0 0 0 1px rgba(0, 169, 90, 0.12), var(--shadow);
 }
 
-.fixture-card-status {
-  color: var(--muted);
-  display: grid;
-  gap: 2px;
-  line-height: 1.1;
-}
-
-.fixture-card-status span {
-  font-size: 11px;
-  font-weight: 720;
-}
-
-.fixture-card-status strong {
-  color: var(--ink);
-  font-size: 12px;
-  font-weight: 720;
-}
-
-.fixture-score-row,
-.fixture-team-row {
+.fixture-side {
   align-items: center;
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  gap: 4px;
+  justify-items: center;
+  min-width: 0;
 }
 
-.fixture-score-row strong {
-  color: #343b43;
-  font-size: 25px;
-  font-weight: 760;
-  min-width: 92px;
-}
-
-.fixture-score-row .team-avatar:first-child,
-.fixture-team-row span:first-child {
-  justify-self: end;
-}
-
-.fixture-score-row .team-avatar:last-child,
-.fixture-team-row span:last-child {
-  justify-self: start;
-}
-
-.fixture-team-row {
+.fixture-side span {
   color: #343b43;
   font-size: 13px;
   font-weight: 720;
+  letter-spacing: 0;
+  line-height: 1;
 }
 
-.fixture-result-card small {
+.fixture-flag {
+  background: #ffffff;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(24, 35, 43, 0.08);
+  display: block;
+  height: 25px;
+  object-fit: cover;
+  width: 38px;
+}
+
+.fixture-flag.logo {
+  object-fit: contain;
+  padding: 2px;
+}
+
+.fixture-flag.fallback {
+  align-items: center;
+  color: var(--accent-dark);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 780;
+  justify-content: center;
+}
+
+.fixture-card-center {
+  align-items: center;
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+  min-width: 0;
+}
+
+.fixture-card-center > span,
+.fixture-card-center small {
+  color: #4d5863;
+  font-size: 11px;
+  font-weight: 620;
+  line-height: 1.05;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fixture-card-center small {
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 650;
+  font-size: 10.5px;
+}
+
+.fixture-card-center strong {
+  align-items: center;
+  color: #343b43;
+  display: inline-flex;
+  font-size: 24px;
+  font-weight: 720;
+  gap: 4px;
+  justify-content: center;
+  letter-spacing: 0;
+  line-height: 1;
+  min-width: 78px;
+  white-space: nowrap;
+}
+
+.fixture-card-center strong i {
+  border-bottom: 4px solid transparent;
+  border-left: 6px solid #11181f;
+  border-top: 4px solid transparent;
+  display: inline-block;
+  height: 0;
+  width: 0;
+}
+
+.fixture-result-card.is-scheduled .fixture-card-center strong {
+  font-size: 23px;
 }
 
 .transfer-panel {
@@ -2828,12 +2872,13 @@ p {
   }
 
   .fixture-result-card {
-    min-height: 104px;
+    grid-template-columns: 58px minmax(0, 1fr) 58px;
+    min-height: 74px;
   }
 
-  .fixture-score-row strong {
-    font-size: 22px;
-    min-width: 82px;
+  .fixture-card-center strong {
+    font-size: 23px;
+    min-width: 76px;
   }
 
   .ticket-metrics {

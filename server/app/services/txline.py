@@ -1,13 +1,14 @@
 import asyncio
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 
 from ..config import Settings
 from ..db import get_pool
-from .api_football import hydrate_api_football_details
+from .api_football import fetch_api_football_match_backfill, hydrate_api_football_details
 
 logger = logging.getLogger(__name__)
 _txline_odds_tables_ready = False
@@ -59,6 +60,9 @@ async def fetch_txline_matches(settings: Settings) -> list[dict[str, Any]] | Non
                 await hydrate_odds_snapshots(client, base, settings, guest_jwt, matches)
                 try:
                     await hydrate_api_football_details(client, settings, matches)
+                    api_backfill = await fetch_api_football_match_backfill(client, settings, matches)
+                    if api_backfill:
+                        matches = merge_match_collections(matches, api_backfill)
                 except Exception as exc:
                     logger.warning("Unable to hydrate API-FOOTBALL details: %s", exc)
                 save_txline_match_snapshots(matches)
@@ -599,12 +603,69 @@ def merge_cached_matches(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
     cached = load_txline_match_snapshots()
     if not cached:
         return matches
-    merged = {str(match.get("id")): match for match in cached if match.get("id")}
-    for match in matches:
-        if match.get("id"):
-            key = str(match["id"])
-            merged[key] = merge_match_snapshot(merged.get(key), match)
+    return merge_match_collections(cached, matches)
+
+
+def merge_match_collections(
+    base_matches: list[dict[str, Any]],
+    incoming_matches: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    fallback_indexes: dict[str, str] = {}
+
+    for match in [*base_matches, *incoming_matches]:
+        if not match.get("id"):
+            continue
+        key = fixture_identity_key(match) or f"id:{match['id']}"
+        existing_key = fallback_indexes.get(str(match["id"]), key)
+        key = existing_key if existing_key in merged else key
+        if key in merged:
+            merged[key] = merge_same_fixture(merged[key], match)
+        else:
+            merged[key] = dict(match)
+        fallback_indexes[str(match["id"])] = key
+
     return sorted(merged.values(), key=lambda item: safe_int(item.get("startTime")), reverse=True)
+
+
+def merge_same_fixture(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    merged = merge_match_snapshot(existing, incoming)
+    preferred = incoming if is_txline_fixture_id(incoming.get("id")) else existing
+    if is_txline_fixture_id(preferred.get("id")):
+        merged["id"] = preferred.get("id")
+        merged["oracleProof"] = preferred.get("oracleProof") or merged.get("oracleProof")
+        merged["source"] = preferred.get("source") or merged.get("source")
+    return merged
+
+
+def fixture_identity_key(match: dict[str, Any]) -> str:
+    home = normalize_fixture_team(match.get("home"))
+    away = normalize_fixture_team(match.get("away"))
+    match_date = fixture_date_key(match.get("startTime"))
+    if not home or not away or not match_date:
+        return ""
+    return f"{':'.join(sorted([home, away]))}:{match_date}"
+
+
+def fixture_date_key(value: Any) -> str:
+    if not value:
+        return ""
+    try:
+        if isinstance(value, (int, float)):
+            date_value = datetime.fromtimestamp(float(value) / 1000, tz=timezone.utc)
+        else:
+            date_value = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    return date_value.date().isoformat()
+
+
+def normalize_fixture_team(value: Any) -> str:
+    return "".join(char for char in str(value or "").lower() if char.isalnum())
+
+
+def is_txline_fixture_id(value: Any) -> bool:
+    return str(value or "").isdigit()
 
 
 def merge_match_snapshot(

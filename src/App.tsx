@@ -1111,34 +1111,50 @@ function MatchResultsStrip({
       {matches.slice(0, 6).map((match) => {
         const homeScore = match.score[match.home] ?? 0;
         const awayScore = match.score[match.away] ?? 0;
+        const isScheduled = match.status === "SCHEDULED";
+        const topLabel = fixtureCardTopLabel(match);
+        const bottomLabel = fixtureCardBottomLabel(match);
         return (
           <button
-            className={`fixture-result-card ${match.id === selectedMatchId ? "is-selected" : ""}`}
+            className={`fixture-result-card ${match.id === selectedMatchId ? "is-selected" : ""} ${
+              isScheduled ? "is-scheduled" : "is-played"
+            }`}
             key={match.id}
             type="button"
             onClick={() => onSelect(match.id)}
           >
-            <div className="fixture-card-status">
-              <span>{match.round || matchStatusLabel(match)}</span>
-              <strong>{matchStatusLabel(match)}</strong>
-            </div>
-            <div className="fixture-score-row">
-              <TeamAvatar code={match.homeCode} logoUrl={match.homeLogoUrl} />
-              <strong>
-                {match.status === "SCHEDULED" ? formatFixtureTime(match.startTime) : `${homeScore} - ${awayScore}`}
-              </strong>
-              <TeamAvatar code={match.awayCode} logoUrl={match.awayLogoUrl} />
-            </div>
-            <div className="fixture-team-row">
+            <div className="fixture-side home">
+              <FixtureFlag code={match.homeCode} logoUrl={match.homeLogoUrl} />
               <span>{match.homeCode}</span>
+            </div>
+            <div className="fixture-card-center">
+              <span>{topLabel}</span>
+              <strong>
+                {isScheduled ? formatFixtureCardTime(match.startTime) : `${homeScore} - ${awayScore}`}
+                {!isScheduled && <i aria-hidden="true" />}
+              </strong>
+              {bottomLabel && <small>{bottomLabel}</small>}
+            </div>
+            <div className="fixture-side away">
+              <FixtureFlag code={match.awayCode} logoUrl={match.awayLogoUrl} />
               <span>{match.awayCode}</span>
             </div>
-            <small>{formatFixtureDate(match.startTime)}</small>
           </button>
         );
       })}
     </section>
   );
+}
+
+function FixtureFlag({ code, logoUrl }: { code: string; logoUrl?: string }) {
+  const flagUrl = flagUrlForCode(code);
+  if (flagUrl) {
+    return <img alt="" className="fixture-flag" src={flagUrl} />;
+  }
+  if (logoUrl) {
+    return <img alt="" className="fixture-flag logo" src={logoUrl} />;
+  }
+  return <span className="fixture-flag fallback">{code.slice(0, 3)}</span>;
 }
 
 function MarketGlyph({ market, match }: { market: MarketDefinition; match: MatchSnapshot }) {
@@ -2937,6 +2953,17 @@ function formatFixtureTime(value?: string | number): string {
   });
 }
 
+function formatFixtureCardTime(value?: string | number): string {
+  if (!value) return "TBA";
+  const date = typeof value === "number" ? new Date(value) : new Date(value);
+  if (Number.isNaN(date.getTime())) return "TBA";
+  return date.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    hour12: false,
+    minute: "2-digit",
+  });
+}
+
 function formatFixtureDate(value?: string | number): string {
   if (!value) return "Date TBA";
   const date = typeof value === "number" ? new Date(value) : new Date(value);
@@ -2945,6 +2972,16 @@ function formatFixtureDate(value?: string | number): string {
     day: "2-digit",
     month: "short",
     year: "numeric",
+  });
+}
+
+function formatFixtureDateShort(value?: string | number): string {
+  if (!value) return "Date TBA";
+  const date = typeof value === "number" ? new Date(value) : new Date(value);
+  if (Number.isNaN(date.getTime())) return "Date TBA";
+  return date.toLocaleDateString("en-US", {
+    day: "numeric",
+    month: "short",
   });
 }
 
@@ -2962,6 +2999,37 @@ function matchStatusLabel(match: MatchSnapshot): string {
   if (match.status === "FINAL") return "Final";
   if (match.status === "LIVE") return match.minute || "Live";
   return "Scheduled";
+}
+
+function fixtureCardTopLabel(match: MatchSnapshot): string {
+  const stage = fixtureStageLabel(match);
+  if (match.status === "SCHEDULED") return stage || "Upcoming";
+  return stage && stage.toLowerCase() !== "final"
+    ? stage
+    : `${matchStatusLabel(match)} - ${formatFixtureDateShort(match.startTime)}`;
+}
+
+function fixtureCardBottomLabel(match: MatchSnapshot): string {
+  const date = formatFixtureDateShort(match.startTime);
+  if (match.status === "SCHEDULED") return date;
+  const stage = fixtureStageLabel(match);
+  return stage && stage.toLowerCase() !== "final" ? `${matchStatusLabel(match)} - ${date}` : "";
+}
+
+function fixtureStageLabel(match: MatchSnapshot): string {
+  const round = cleanFixtureRound(match.round);
+  if (round && !["scheduled", "live", "final"].includes(round.toLowerCase())) return round;
+  if (isWorldCupFinal(match)) return "Final";
+  if (isWorldCupThirdPlace(match)) return "Third place";
+  return round || "";
+}
+
+function cleanFixtureRound(value?: string | null): string {
+  const normalized = String(value || "")
+    .replace(/^world cup\s*[-:]\s*/i, "")
+    .replace(/^fifa world cup\s*[-:]\s*/i, "")
+    .trim();
+  return normalized;
 }
 
 function sameTeam(left: string, right: string): boolean {
