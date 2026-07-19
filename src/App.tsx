@@ -744,17 +744,17 @@ export function App() {
           </section>
 
           <aside className="insight-column" aria-label="Match insights">
+            {selectedMatch && (
+              <div className="desktop-lineup-wrapper">
+                <LineupPreview match={selectedMatch} />
+              </div>
+            )}
             {matches.length > 0 && (
               <MatchResultsStrip
                 matches={matches}
                 selectedMatchId={selectedMatch?.id ?? ""}
                 onSelect={selectMatch}
               />
-            )}
-            {selectedMatch && (
-              <div className="desktop-lineup-wrapper">
-                <LineupPreview match={selectedMatch} />
-              </div>
             )}
             {selectedMatch && <TransferWatchPanel match={selectedMatch} />}
             <MarketInsightPanel
