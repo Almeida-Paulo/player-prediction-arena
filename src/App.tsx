@@ -2582,6 +2582,11 @@ function isWorldCupSemifinal(match: MatchSnapshot): boolean {
   return participants === "argentina:england" || participants === "france:spain";
 }
 
+function isWorldCupQuarterFinal(match: MatchSnapshot): boolean {
+  const participants = teamPairKey(match);
+  return participants === "argentina:switzerland";
+}
+
 function teamPairKey(match: MatchSnapshot): string {
   return [match.home, match.away].map((team) => team.toLowerCase()).sort().join(":");
 }
@@ -2866,6 +2871,8 @@ function flagUrlForCode(code: string): string {
     NLD: "nl",
     POR: "pt",
     SPA: "es",
+    SUI: "ch",
+    SWI: "ch",
     USA: "us",
   };
   const flagCode = flagCodes[normalized];
@@ -3023,6 +3030,7 @@ function fixtureStageLabel(match: MatchSnapshot): string {
   if (isWorldCupFinal(match)) return "World Cup Final";
   if (isWorldCupThirdPlace(match)) return "Third place";
   if (isWorldCupSemifinal(match)) return "Semifinal";
+  if (isWorldCupQuarterFinal(match)) return "Quarter-finals";
   if (round && !["scheduled", "live", "final"].includes(round.toLowerCase())) return round;
   return "";
 }

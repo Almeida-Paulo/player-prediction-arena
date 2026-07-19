@@ -1192,6 +1192,24 @@ def is_world_cup_fixture(item: dict[str, Any]) -> bool:
 
 
 def team_code(name: str) -> str:
+    explicit = {
+        "argentina": "ARG",
+        "brazil": "BRA",
+        "england": "ENG",
+        "france": "FRA",
+        "japan": "JPN",
+        "mexico": "MEX",
+        "netherlands": "NLD",
+        "portugal": "POR",
+        "spain": "SPA",
+        "switzerland": "SUI",
+        "united states": "USA",
+        "usa": "USA",
+    }
+    normalized = " ".join(str(name or "").lower().split())
+    if normalized in explicit:
+        return explicit[normalized]
+
     clean = "".join(char for char in name.upper() if char.isalnum() or char.isspace()).strip()
     parts = clean.split()
     if len(parts) > 1:
