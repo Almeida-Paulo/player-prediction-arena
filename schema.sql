@@ -3,9 +3,13 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   display_name TEXT NOT NULL DEFAULT 'Prediction Arena Player',
+  email TEXT NOT NULL DEFAULT '',
+  auth_provider TEXT NOT NULL DEFAULT 'wallet',
+  auth_subject TEXT NOT NULL DEFAULT '',
   wallet_address TEXT NOT NULL DEFAULT '',
   role TEXT NOT NULL DEFAULT 'player',
   balance_cents INTEGER NOT NULL DEFAULT 0,
+  arena_points INTEGER NOT NULL DEFAULT 0,
   total_bets INTEGER NOT NULL DEFAULT 0,
   packs_opened INTEGER NOT NULL DEFAULT 0,
   current_streak INTEGER NOT NULL DEFAULT 0,
@@ -15,6 +19,21 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT 'Prediction Arena Player';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider TEXT NOT NULL DEFAULT 'wallet';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_subject TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_address TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'player';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS balance_cents INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS arena_points INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS total_bets INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS packs_opened INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS current_streak INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS best_streak INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS risk_managed_wins INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS oracle_settlements INTEGER NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS user_cards (
   instance_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -51,6 +70,12 @@ CREATE TABLE IF NOT EXISTS positions (
   settled_at TIMESTAMPTZ
 );
 
+ALTER TABLE positions ADD COLUMN IF NOT EXISTS outcome TEXT NOT NULL DEFAULT 'yes';
+ALTER TABLE positions ADD COLUMN IF NOT EXISTS gross_payout_cents INTEGER;
+ALTER TABLE positions ADD COLUMN IF NOT EXISTS net_profit_cents INTEGER;
+ALTER TABLE positions ADD COLUMN IF NOT EXISTS activated_card_ids_json JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE positions ADD COLUMN IF NOT EXISTS settlement_json JSONB;
+
 CREATE INDEX IF NOT EXISTS idx_positions_user_match ON positions(user_id, match_id);
 CREATE INDEX IF NOT EXISTS idx_positions_settled ON positions(settled);
 
@@ -60,13 +85,33 @@ CREATE TABLE IF NOT EXISTS ledger_entries (
   type TEXT NOT NULL,
   amount_cents INTEGER NOT NULL,
   balance_after_cents INTEGER NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'USDC',
   position_id UUID,
   note TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'USDC';
+
 CREATE INDEX IF NOT EXISTS idx_ledger_entries_user_time
   ON ledger_entries(user_id, created_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_auth_identity
+  ON users(auth_provider, auth_subject)
+  WHERE auth_subject <> '';
+
+CREATE TABLE IF NOT EXISTS point_entries (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  points_delta INTEGER NOT NULL,
+  points_after INTEGER NOT NULL,
+  note TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_point_entries_user_time
+  ON point_entries(user_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS earned_badges (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

@@ -11,6 +11,7 @@ import {
   Gift,
   HelpCircle,
   History,
+  Mail,
   LifeBuoy,
   Link2,
   LockKeyhole,
@@ -36,9 +37,11 @@ import { teamStats, topRatedPlayer } from "../shared/settlement";
 import type {
   CardDefinition,
   CardType,
+  AuthProvider,
   MarketDefinition,
   MatchSnapshot,
   PlatformLedgerEntry,
+  PlatformPointEntry,
   PlatformUserState,
   PositionInput,
   SettledPosition,
@@ -58,6 +61,7 @@ import {
   getMatches,
   getPlatformUserState,
   grantPlatformCredits,
+  grantPlatformPoints,
   openPlatformPack,
   settlePlatformMatch,
   settlePositionApi,
@@ -67,6 +71,9 @@ interface AppState {
   connected: boolean;
   userId: string;
   displayName: string;
+  email: string;
+  authProvider: AuthProvider;
+  authSubject: string;
   walletAddress: string;
   role: "admin" | "player";
   progress: UserProgress;
@@ -74,6 +81,7 @@ interface AppState {
   positions: PositionInput[];
   settled: SettledPosition[];
   ledger: PlatformLedgerEntry[];
+  pointLedger: PlatformPointEntry[];
   locks: Record<string, string[]>;
   selectedMatchId: string;
   selectedMarketId: string;
@@ -81,6 +89,7 @@ interface AppState {
 }
 
 type AccountView = "home" | "profile" | "rewards" | "leaderboard" | "help";
+type AuthMode = "login" | "signup";
 
 interface MarketItem {
   match: MatchSnapshot;
@@ -95,11 +104,20 @@ interface MarketActivity {
   history: PlatformHistoryPoint[];
 }
 
+interface AuthFormPayload {
+  provider: AuthProvider;
+  displayName: string;
+  email: string;
+  walletAddress: string;
+  authSubject: string;
+}
+
 const STORAGE_KEY = "player-prediction-arena-ts";
 const USER_ID_STORAGE_KEY = "prediction-arena-user-id";
 
 const initialProgress: UserProgress = {
   balanceCents: 0,
+  arenaPoints: 0,
   totalBets: 0,
   packsOpened: 0,
   currentStreak: 0,
@@ -113,6 +131,9 @@ const initialState: AppState = {
   connected: false,
   userId: "",
   displayName: "",
+  email: "",
+  authProvider: "wallet",
+  authSubject: "",
   walletAddress: "",
   role: "player",
   progress: initialProgress,
@@ -120,6 +141,7 @@ const initialState: AppState = {
   positions: [],
   settled: [],
   ledger: [],
+  pointLedger: [],
   locks: {},
   selectedMatchId: "",
   selectedMarketId: "home-win",
@@ -127,6 +149,28 @@ const initialState: AppState = {
 };
 
 const categories = ["World Cup", "Crypto", "Politics", "Finance", "Culture", "Technology", "Climate"];
+
+const authOptions: Array<{
+  provider: AuthProvider;
+  label: string;
+  detail: string;
+}> = [
+  {
+    provider: "sui-zklogin",
+    label: "Google zkLogin",
+    detail: "Sui-style onboarding with email and a web3 account.",
+  },
+  {
+    provider: "zksync",
+    label: "ZKsync",
+    detail: "EVM smart account path for account abstraction.",
+  },
+  {
+    provider: "wallet",
+    label: "Wallet",
+    detail: "Connect with a browser wallet address.",
+  },
+];
 
 export function App() {
   const [matches, setMatches] = useState<MatchSnapshot[]>([]);
@@ -143,6 +187,7 @@ export function App() {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [cardPickerOpen, setCardPickerOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<AuthMode | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -228,15 +273,13 @@ export function App() {
 
   async function connectWallet() {
     const existingUserId = state.userId || localStorage.getItem(USER_ID_STORAGE_KEY) || "";
+    if (!existingUserId) {
+      setAuthMode("login");
+      return;
+    }
     const nextUserId = existingUserId || `user-${crypto.randomUUID().slice(0, 8)}`;
     try {
-      const platformState = existingUserId
-        ? await getPlatformUserState(existingUserId)
-        : await createPlatformUser({
-            displayName: "Prediction Arena Player",
-            id: nextUserId,
-            walletAddress: demoWalletAddress(nextUserId),
-          });
+      const platformState = await getPlatformUserState(existingUserId);
       localStorage.setItem(USER_ID_STORAGE_KEY, platformState.user.id);
       setState((current) => mergePlatformState(current, platformState, { connected: true }));
       setActiveView("home");
@@ -253,25 +296,40 @@ export function App() {
     }
   }
 
-  async function signUp() {
+  function signUp() {
+    setAuthMode("signup");
+  }
+
+  async function submitAuth(payload: AuthFormPayload) {
     const nextUserId = `user-${crypto.randomUUID().slice(0, 8)}`;
+    const walletAddress = payload.walletAddress || demoWalletAddress(`${payload.provider}:${payload.email}`);
     try {
       const platformState = await createPlatformUser({
-        displayName: "Prediction Arena Player",
+        authProvider: payload.provider,
+        authSubject: payload.authSubject || authSubjectFor(payload.provider, payload.email, walletAddress),
+        displayName: payload.displayName,
+        email: payload.email,
         id: nextUserId,
-        walletAddress: demoWalletAddress(nextUserId),
+        walletAddress,
       });
       localStorage.setItem(USER_ID_STORAGE_KEY, platformState.user.id);
       setState((current) => mergePlatformState(current, platformState, { connected: true }));
+      setAuthMode(null);
       setActiveView("home");
-      showToast("Account created. Ask the admin to grant Arena Credits before placing predictions.");
+      showToast("Account ready. Admin-funded USDC is required before placing predictions.");
     } catch {
+      const authSubject = payload.authSubject || authSubjectFor(payload.provider, payload.email, walletAddress);
       setState((current) => ({
         ...current,
+        authProvider: payload.provider,
+        authSubject,
         connected: true,
+        displayName: payload.displayName,
+        email: payload.email,
         userId: nextUserId,
-        walletAddress: demoWalletAddress(nextUserId),
+        walletAddress,
       }));
+      setAuthMode(null);
       setActiveView("home");
       showToast("Account created locally. Backend user state is unavailable.");
     }
@@ -315,7 +373,7 @@ export function App() {
     const targetMarket = markets.find((market) => market.id === targetMarketId) ?? selectedMarket;
     if (!selectedMatch || !targetMarket) return showToast("Select an available World Cup market.");
     if (stake <= 0) return showToast("Stake must be greater than zero.");
-    if (stake > state.progress.balanceCents) return showToast("Insufficient balance.");
+    if (stake > state.progress.balanceCents) return showToast("Insufficient USDC balance.");
 
     const blockedCard = selectedCards.find((card) => lockedForMatch.has(card.id));
     if (blockedCard) return showToast(`${blockedCard.name} is already locked for this match.`);
@@ -357,7 +415,7 @@ export function App() {
             selectedMarketId: targetMarket.id,
           }),
         );
-        showToast("Prediction placed. Balance, cards and history were saved.");
+        showToast("Prediction placed. USDC balance, cards and history were saved.");
         return;
       } catch (error) {
         return showToast(error instanceof Error ? error.message : "Unable to place prediction.");
@@ -481,6 +539,23 @@ export function App() {
       showToast(`Credited ${formatCents(amountCents)} to ${targetUserId}.`);
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Unable to grant credits.");
+    }
+  }
+
+  async function grantPoints(targetUserId: string, points: number, adminToken: string) {
+    try {
+      const platformState = await grantPlatformPoints({
+        adminToken,
+        note: "Hackathon event points",
+        points,
+        targetUserId,
+      });
+      if (targetUserId === state.userId) {
+        setState((current) => mergePlatformState(current, platformState));
+      }
+      showToast(`Credited ${formatPoints(points)} to ${targetUserId}.`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Unable to grant points.");
     }
   }
 
@@ -660,6 +735,7 @@ export function App() {
           state={state}
           userId={state.userId}
           onGrantCredits={grantCredits}
+          onGrantPoints={grantPoints}
           onOpenPack={openStarterPack}
           onSelectView={setActiveView}
           onShowToast={showToast}
@@ -676,6 +752,14 @@ export function App() {
           onChangeMoment={setMomentCardId}
           onChangePower={setPowerCardId}
           onClose={() => setCardPickerOpen(false)}
+        />
+      )}
+
+      {authMode && (
+        <AuthModal
+          mode={authMode}
+          onClose={() => setAuthMode(null)}
+          onSubmit={submitAuth}
         />
       )}
 
@@ -1156,6 +1240,7 @@ function AccountScreen({
   state,
   userId,
   onGrantCredits,
+  onGrantPoints,
   onOpenPack,
   onSelectView,
   onShowToast,
@@ -1168,6 +1253,7 @@ function AccountScreen({
   state: AppState;
   userId: string;
   onGrantCredits: (targetUserId: string, amountCents: number, adminToken: string) => void;
+  onGrantPoints: (targetUserId: string, points: number, adminToken: string) => void;
   onOpenPack: () => void;
   onSelectView: (view: AccountView) => void;
   onShowToast: (message: string) => void;
@@ -1202,7 +1288,15 @@ function AccountScreen({
             <div className="profile-grid">
               <label className="field">
                 <span>Display name</span>
-                <input defaultValue="Prediction Arena Player" />
+                <input defaultValue={state.displayName || "Prediction Arena Player"} />
+              </label>
+              <label className="field">
+                <span>Email</span>
+                <input readOnly value={state.email || "Not connected"} />
+              </label>
+              <label className="field">
+                <span>Auth method</span>
+                <input readOnly value={authProviderLabel(state.authProvider)} />
               </label>
               <label className="field">
                 <span>Wallet</span>
@@ -1225,10 +1319,26 @@ function AccountScreen({
 
         {activeView === "rewards" && (
           <div className="account-stack">
-            <div className="balance-hero">
+            <div className="balance-grid">
+              <div className="balance-hero">
+                <UsdcIcon />
+                <div>
+                  <span>Available balance</span>
+                  <strong>{formatCents(state.progress.balanceCents)}</strong>
+                </div>
+              </div>
+              <div className="balance-hero points-hero">
+                <Medal size={30} />
+                <div>
+                  <span>Arena Points</span>
+                  <strong>{formatPoints(state.progress.arenaPoints)}</strong>
+                </div>
+              </div>
+            </div>
+            <div className="account-card account-actions-card">
               <div>
-                <span>Available balance</span>
-                <strong>{formatCents(state.progress.balanceCents)}</strong>
+                <span>Starter Pack</span>
+                <strong>{packAvailable ? "Unlocked" : "Locked until 10 predictions"}</strong>
               </div>
               <button className="signup-button" disabled={!packAvailable} type="button" onClick={onOpenPack}>
                 <PackageOpen size={18} />
@@ -1238,7 +1348,7 @@ function AccountScreen({
 
             <div className="account-grid two">
               <div className="account-card">
-                <SectionTitle eyebrow="History" title="Prediction results" />
+                <SectionTitle eyebrow="USDC" title="Prediction results" />
                 <RewardHistory positions={state.positions} settled={state.settled} />
               </div>
               <div className="account-card">
@@ -1247,10 +1357,21 @@ function AccountScreen({
                 <BadgeShelf badges={earnedBadges} />
               </div>
             </div>
+            <div className="account-grid two">
+              <div className="account-card">
+                <SectionTitle eyebrow="USDC ledger" title="Balance activity" />
+                <LedgerList ledger={state.ledger} />
+              </div>
+              <div className="account-card">
+                <SectionTitle eyebrow="Points ledger" title="Arena Points activity" />
+                <PointLedgerList pointLedger={state.pointLedger} />
+              </div>
+            </div>
             <CreditDesk
               defaultTargetUserId={userId}
               ledger={state.ledger}
               onGrantCredits={onGrantCredits}
+              onGrantPoints={onGrantPoints}
             />
           </div>
         )}
@@ -1272,9 +1393,9 @@ function AccountScreen({
                 stats={stats}
               />
               <LeaderboardTable
-                currentMetric={`${stats.correctPredictions}`}
-                label="Correct predictions"
-                metricKey="correctPredictions"
+                currentMetric={formatPoints(state.progress.arenaPoints)}
+                label="Arena Points"
+                metricKey="arenaPoints"
                 stats={stats}
               />
             </div>
@@ -1314,17 +1435,132 @@ function MenuItem({ icon, label, onClick }: { icon: ReactNode; label: string; on
   );
 }
 
+function AuthModal({
+  mode,
+  onClose,
+  onSubmit,
+}: {
+  mode: AuthMode;
+  onClose: () => void;
+  onSubmit: (payload: AuthFormPayload) => void;
+}) {
+  const [provider, setProvider] = useState<AuthProvider>("sui-zklogin");
+  const [displayName, setDisplayName] = useState("Prediction Arena Player");
+  const [email, setEmail] = useState("");
+  const [walletAddress, setWalletAddress] = useState("");
+  const selected = authOptions.find((option) => option.provider === provider) ?? authOptions[0];
+  const needsWallet = provider === "wallet" || provider === "zksync";
+  const canSubmit = Boolean(displayName.trim() && email.trim() && (!needsWallet || walletAddress.trim()));
+
+  return (
+    <div className="card-modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        aria-modal="true"
+        className="auth-modal"
+        role="dialog"
+        aria-labelledby="auth-modal-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="card-modal-header">
+          <div>
+            <span>{mode === "signup" ? "Create account" : "Login"}</span>
+            <h2 id="auth-modal-title">Choose your account path</h2>
+          </div>
+          <button aria-label="Close account dialog" type="button" onClick={onClose}>
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="auth-option-grid">
+          {authOptions.map((option) => (
+            <button
+              className={`auth-option ${provider === option.provider ? "is-selected" : ""}`}
+              key={option.provider}
+              type="button"
+              onClick={() => setProvider(option.provider)}
+            >
+              {option.provider === "sui-zklogin" ? <Mail size={18} /> : <ShieldCheck size={18} />}
+              <strong>{option.label}</strong>
+              <span>{option.detail}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="profile-grid">
+          <label className="field">
+            <span>Display name</span>
+            <input
+              placeholder="Your public username"
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>Email</span>
+            <input
+              placeholder="you@example.com"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+            />
+          </label>
+          <label className={`field ${needsWallet ? "" : "wide"}`}>
+            <span>{needsWallet ? "Wallet address" : "Derived account"}</span>
+            <input
+              placeholder={needsWallet ? "0x..." : "Generated from email for the demo"}
+              readOnly={!needsWallet}
+              value={needsWallet ? walletAddress : authSubjectFor(provider, email, "")}
+              onChange={(event) => setWalletAddress(event.target.value)}
+            />
+          </label>
+        </div>
+
+        <div className="auth-summary">
+          <UsdcIcon />
+          <div>
+            <strong>Admin-funded USDC balance</strong>
+            <span>{selected.label} only creates the account. Deposits come from the admin credit desk for now.</span>
+          </div>
+        </div>
+
+        <div className="card-modal-footer">
+          <span>{selected.label}</span>
+          <button
+            className="signup-button"
+            disabled={!canSubmit}
+            type="button"
+            onClick={() =>
+              onSubmit({
+                authSubject: authSubjectFor(provider, email, walletAddress),
+                displayName,
+                email,
+                provider,
+                walletAddress,
+              })
+            }
+          >
+            {mode === "signup" ? "Create account" : "Continue"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function CreditDesk({
   defaultTargetUserId,
   ledger,
   onGrantCredits,
+  onGrantPoints,
 }: {
   defaultTargetUserId: string;
   ledger: PlatformLedgerEntry[];
   onGrantCredits: (targetUserId: string, amountCents: number, adminToken: string) => void;
+  onGrantPoints: (targetUserId: string, points: number, adminToken: string) => void;
 }) {
   const [targetUserId, setTargetUserId] = useState(defaultTargetUserId);
   const [amount, setAmount] = useState(250);
+  const [points, setPoints] = useState(500);
   const [adminToken, setAdminToken] = useState("");
 
   useEffect(() => {
@@ -1340,13 +1576,23 @@ function CreditDesk({
           <input value={targetUserId} onChange={(event) => setTargetUserId(event.target.value)} />
         </label>
         <label className="field">
-          <span>Credit amount</span>
+          <span>USDC amount</span>
           <input
             min={1}
             step={25}
             type="number"
             value={amount}
             onChange={(event) => setAmount(Math.max(0, Number(event.target.value)))}
+          />
+        </label>
+        <label className="field">
+          <span>Event points</span>
+          <input
+            min={1}
+            step={50}
+            type="number"
+            value={points}
+            onChange={(event) => setPoints(Math.max(0, Number(event.target.value)))}
           />
         </label>
         <label className="field">
@@ -1364,7 +1610,15 @@ function CreditDesk({
           type="button"
           onClick={() => onGrantCredits(targetUserId, Math.round(amount * 100), adminToken)}
         >
-          Grant credits
+          Grant USDC
+        </button>
+        <button
+          className="login-button"
+          disabled={!targetUserId || !adminToken || points <= 0}
+          type="button"
+          onClick={() => onGrantPoints(targetUserId, Math.round(points), adminToken)}
+        >
+          Grant points
         </button>
       </div>
       <LedgerList ledger={ledger} />
@@ -1386,6 +1640,31 @@ function LedgerList({ ledger }: { ledger: PlatformLedgerEntry[] }) {
         </div>
       ))}
     </div>
+  );
+}
+
+function PointLedgerList({ pointLedger }: { pointLedger: PlatformPointEntry[] }) {
+  if (!pointLedger.length) return <div className="event-empty">No Arena Points events yet.</div>;
+  return (
+    <div className="ledger-list">
+      {pointLedger.slice(0, 6).map((entry) => (
+        <div className="ledger-row" key={entry.id}>
+          <span>{cleanMarketLabel(entry.type)}</span>
+          <strong className={entry.pointsDelta >= 0 ? "is-positive" : "is-negative"}>
+            {formatSignedPoints(entry.pointsDelta)}
+          </strong>
+          <small>{entry.note || `${entry.pointsAfter.toLocaleString("en-US")} AP`}</small>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function UsdcIcon() {
+  return (
+    <span className="usdc-icon" aria-label="USDC">
+      $
+    </span>
   );
 }
 
@@ -1713,7 +1992,7 @@ function LeaderboardTable({
 }: {
   currentMetric: string;
   label: string;
-  metricKey: "predictions" | "wonCents" | "correctPredictions";
+  metricKey: "predictions" | "wonCents" | "correctPredictions" | "arenaPoints";
   stats: ReturnType<typeof getAccountStats>;
 }) {
   const leaders = rankPlatformUsersBy(metricKey).slice(0, 4);
@@ -1729,7 +2008,7 @@ function LeaderboardTable({
         <User size={18} />
         <strong>
           You
-          <small>Connected wallet</small>
+          <small>Connected account</small>
         </strong>
         <em>{currentMetric}</em>
       </div>
@@ -1745,7 +2024,7 @@ function LeaderboardRow({
   rank,
   user,
 }: {
-  metricKey: "predictions" | "wonCents" | "correctPredictions";
+  metricKey: "predictions" | "wonCents" | "correctPredictions" | "arenaPoints";
   rank: number;
   user: PlatformUser;
 }) {
@@ -1822,6 +2101,7 @@ function loadState(): AppState {
       ...parsed,
       progress: { ...initialProgress, ...(parsed.progress ?? {}) },
       ledger: parsed.ledger ?? [],
+      pointLedger: parsed.pointLedger ?? [],
       userId: parsed.userId || localStorage.getItem(USER_ID_STORAGE_KEY) || "",
     } as AppState;
   } catch {
@@ -1834,12 +2114,16 @@ function mergePlatformState(current: AppState, platformState: PlatformUserState,
     ...current,
     ...extra,
     connected: extra.connected ?? current.connected,
+    authProvider: platformState.user.authProvider ?? "wallet",
+    authSubject: platformState.user.authSubject ?? "",
     displayName: platformState.user.displayName,
+    email: platformState.user.email ?? "",
     inventory: platformState.inventory,
     ledger: platformState.ledger,
+    pointLedger: platformState.pointLedger ?? [],
     locks: buildLocks(platformState.positions),
     positions: platformState.positions,
-    progress: platformState.progress,
+    progress: { ...initialProgress, ...platformState.progress },
     role: platformState.user.role,
     settled: platformState.settled,
     userId: platformState.user.id,
@@ -1857,6 +2141,19 @@ function buildLocks(positions: PositionInput[]): Record<string, string[]> {
 function demoWalletAddress(seed: string): string {
   const clean = seed.replace(/[^a-zA-Z0-9]/g, "").padEnd(12, "0");
   return `0x${clean.slice(0, 4)}...${clean.slice(-4)}`;
+}
+
+function authSubjectFor(provider: AuthProvider, email: string, walletAddress: string): string {
+  if (provider === "sui-zklogin") return `sui:google:${email.trim().toLowerCase()}`;
+  if (provider === "google") return `google:${email.trim().toLowerCase()}`;
+  return walletAddress.trim().toLowerCase();
+}
+
+function authProviderLabel(provider: AuthProvider): string {
+  if (provider === "sui-zklogin") return "Google zkLogin";
+  if (provider === "zksync") return "ZKsync";
+  if (provider === "google") return "Google";
+  return "Wallet";
 }
 
 function pickLaunchMatch(matches: MatchSnapshot[]): MatchSnapshot | undefined {
@@ -2041,10 +2338,11 @@ function chartDateTicks(history: PlatformHistoryPoint[]): Array<{ index: number;
 }
 
 function formatCents(cents: number): string {
-  return (cents / 100).toLocaleString("en-US", {
+  const dollars = (cents / 100).toLocaleString("en-US", {
     currency: "USD",
     style: "currency",
   });
+  return `${dollars} USDC`;
 }
 
 function formatSignedCents(cents: number): string {
@@ -2052,6 +2350,16 @@ function formatSignedCents(cents: number): string {
   if (cents > 0) return `+${absolute}`;
   if (cents < 0) return `-${absolute}`;
   return absolute;
+}
+
+function formatPoints(points: number): string {
+  return `${points.toLocaleString("en-US")} AP`;
+}
+
+function formatSignedPoints(points: number): string {
+  if (points > 0) return `+${formatPoints(points)}`;
+  if (points < 0) return `-${formatPoints(Math.abs(points))}`;
+  return formatPoints(points);
 }
 
 function currentOutcomePercents(activity: MarketActivity, fallbackOddsBps: number): [number, number] {
@@ -2073,9 +2381,10 @@ function positionMarketLabel(market: MarketDefinition, match: MatchSnapshot, out
 
 function formatLeaderboardMetric(
   user: PlatformUser,
-  metricKey: "predictions" | "wonCents" | "correctPredictions",
+  metricKey: "predictions" | "wonCents" | "correctPredictions" | "arenaPoints",
 ): string {
   if (metricKey === "wonCents") return formatCents(user.wonCents);
+  if (metricKey === "arenaPoints") return formatPoints(user.arenaPoints);
   return user[metricKey].toLocaleString("en-US");
 }
 

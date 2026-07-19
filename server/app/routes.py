@@ -37,6 +37,9 @@ class PositionPayload(BaseModel):
 class CreateUserPayload(BaseModel):
     id: str | None = None
     displayName: str = Field(default="Prediction Arena Player", min_length=1, max_length=80)
+    email: str = Field(default="", max_length=160)
+    authProvider: Literal["sui-zklogin", "google", "zksync", "wallet"] = "wallet"
+    authSubject: str = Field(default="", max_length=180)
     walletAddress: str = Field(default="", max_length=120)
 
 
@@ -44,6 +47,12 @@ class AdminCreditPayload(BaseModel):
     targetUserId: str = Field(min_length=1)
     amountCents: int = Field(gt=0)
     note: str = Field(default="Admin credit", max_length=160)
+
+
+class AdminPointsPayload(BaseModel):
+    targetUserId: str = Field(min_length=1)
+    points: int = Field(gt=0)
+    note: str = Field(default="Event points", max_length=160)
 
 
 @router.get("/health")
@@ -96,21 +105,42 @@ async def settle(payload: PositionPayload) -> dict[str, Any]:
 
 @router.post("/users")
 async def create_user(payload: CreateUserPayload) -> dict[str, Any]:
+    validate_auth_payload(payload)
+    auth_subject = normalize_auth_subject(payload)
     user_id = payload.id or f"user-{uuid4().hex[:10]}"
     with get_pool().connection() as conn:
         ensure_platform_tables(conn)
+        existing = None
+        if auth_subject:
+            existing = conn.execute(
+                "SELECT id FROM users WHERE auth_provider = %s AND auth_subject = %s",
+                (payload.authProvider, auth_subject),
+            ).fetchone()
+        if existing:
+            user_id = existing["id"]
         conn.execute(
             """
             INSERT INTO users (
-              id, display_name, wallet_address, role, balance_cents, total_bets, packs_opened,
+              id, display_name, email, auth_provider, auth_subject, wallet_address, role,
+              balance_cents, arena_points, total_bets, packs_opened,
               current_streak, best_streak, risk_managed_wins, oracle_settlements
-            ) VALUES (%s, %s, %s, 'player', 0, 0, 0, 0, 0, 0, 0)
+            ) VALUES (%s, %s, %s, %s, %s, %s, 'player', 0, 0, 0, 0, 0, 0, 0, 0)
             ON CONFLICT (id) DO UPDATE SET
               display_name = EXCLUDED.display_name,
+              email = EXCLUDED.email,
+              auth_provider = EXCLUDED.auth_provider,
+              auth_subject = EXCLUDED.auth_subject,
               wallet_address = EXCLUDED.wallet_address,
               updated_at = now()
             """,
-            (user_id, payload.displayName, payload.walletAddress),
+            (
+                user_id,
+                payload.displayName,
+                normalize_email(payload.email),
+                payload.authProvider,
+                auth_subject,
+                payload.walletAddress,
+            ),
         )
         return serialize_user_state(conn, user_id)
 
@@ -173,6 +203,7 @@ async def create_position(user_id: str, payload: PositionPayload) -> dict[str, A
             (balance_after, user_id),
         )
         insert_ledger(conn, user_id, "stake", -payload.stakeCents, balance_after, payload.id, payload.marketLabel)
+        award_points(conn, user_id, "prediction_entry", 10, payload.marketLabel)
         return serialize_user_state(conn, user_id)
 
 
@@ -274,6 +305,10 @@ async def settle_user_match(user_id: str, match_id: str) -> dict[str, Any]:
         )
         if payout:
             insert_ledger(conn, user_id, "payout", payout, balance_after, None, f"{won_count}/{len(settled_positions)} positions won")
+        if settled_positions:
+            award_points(conn, user_id, "oracle_settlement", len(settled_positions) * 25, "TXLine settlement completed")
+        if won_count:
+            award_points(conn, user_id, "correct_prediction", won_count * 100, f"{won_count} correct predictions")
         conn.execute(
             "UPDATE user_cards SET locked_match_id = NULL WHERE user_id = %s AND locked_match_id = %s",
             (user_id, match_id),
@@ -308,6 +343,20 @@ async def grant_admin_credits(payload: AdminCreditPayload, x_admin_token: str | 
         return serialize_user_state(conn, payload.targetUserId)
 
 
+@router.post("/admin/points")
+async def grant_admin_points(payload: AdminPointsPayload, x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
+    settings = get_settings()
+    if not settings.admin_credit_secret:
+        raise HTTPException(status_code=503, detail="admin_credit_secret_not_configured")
+    if x_admin_token != settings.admin_credit_secret:
+        raise HTTPException(status_code=403, detail="invalid_admin_token")
+
+    with get_pool().connection() as conn:
+        ensure_user(conn, payload.targetUserId)
+        award_points(conn, payload.targetUserId, "event_bonus", payload.points, payload.note)
+        return serialize_user_state(conn, payload.targetUserId)
+
+
 async def find_match_or_404(match_id: str) -> dict[str, Any]:
     all_matches = await matches()
     match = next((item for item in all_matches if item["id"] == match_id), None)
@@ -325,8 +374,12 @@ def ensure_platform_tables(conn: Any) -> None:
 
     conn.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
     conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT 'Prediction Arena Player'")
+    conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider TEXT NOT NULL DEFAULT 'wallet'")
+    conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_subject TEXT NOT NULL DEFAULT ''")
     conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_address TEXT NOT NULL DEFAULT ''")
     conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'player'")
+    conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS arena_points INTEGER NOT NULL DEFAULT 0")
     conn.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS outcome TEXT NOT NULL DEFAULT 'yes'")
     conn.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS gross_payout_cents INTEGER")
     conn.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS net_profit_cents INTEGER")
@@ -340,13 +393,36 @@ def ensure_platform_tables(conn: Any) -> None:
           type TEXT NOT NULL,
           amount_cents INTEGER NOT NULL,
           balance_after_cents INTEGER NOT NULL,
+          currency TEXT NOT NULL DEFAULT 'USDC',
           position_id UUID,
           note TEXT,
           created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )
         """
     )
+    conn.execute("ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'USDC'")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ledger_entries_user_time ON ledger_entries(user_id, created_at DESC)")
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_auth_identity
+          ON users(auth_provider, auth_subject)
+          WHERE auth_subject <> ''
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS point_entries (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          type TEXT NOT NULL,
+          points_delta INTEGER NOT NULL,
+          points_after INTEGER NOT NULL,
+          note TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_point_entries_user_time ON point_entries(user_id, created_at DESC)")
     _platform_tables_ready = True
 
 
@@ -355,9 +431,10 @@ def ensure_user(conn: Any, user_id: str) -> None:
     conn.execute(
         """
         INSERT INTO users (
-          id, display_name, wallet_address, role, balance_cents, total_bets, packs_opened,
+          id, display_name, email, auth_provider, auth_subject, wallet_address, role,
+          balance_cents, arena_points, total_bets, packs_opened,
           current_streak, best_streak, risk_managed_wins, oracle_settlements
-        ) VALUES (%s, 'Prediction Arena Player', '', 'player', 0, 0, 0, 0, 0, 0, 0)
+        ) VALUES (%s, 'Prediction Arena Player', '', 'wallet', '', '', 'player', 0, 0, 0, 0, 0, 0, 0, 0)
         ON CONFLICT (id) DO NOTHING
         """,
         (user_id,),
@@ -384,8 +461,18 @@ def serialize_user_state(conn: Any, user_id: str) -> dict[str, Any]:
     ).fetchall()
     ledger = conn.execute(
         """
-        SELECT id::text, user_id, type, amount_cents, balance_after_cents, note, created_at
+        SELECT id::text, user_id, type, amount_cents, balance_after_cents, currency, note, created_at
         FROM ledger_entries
+        WHERE user_id = %s
+        ORDER BY created_at DESC
+        LIMIT 50
+        """,
+        (user_id,),
+    ).fetchall()
+    point_ledger = conn.execute(
+        """
+        SELECT id::text, user_id, type, points_delta, points_after, note, created_at
+        FROM point_entries
         WHERE user_id = %s
         ORDER BY created_at DESC
         LIMIT 50
@@ -399,11 +486,15 @@ def serialize_user_state(conn: Any, user_id: str) -> dict[str, Any]:
         "user": {
             "id": user["id"],
             "displayName": user["display_name"],
+            "email": user["email"],
+            "authProvider": user["auth_provider"],
+            "authSubject": user["auth_subject"],
             "walletAddress": user["wallet_address"],
             "role": user["role"],
         },
         "progress": {
             "balanceCents": user["balance_cents"],
+            "arenaPoints": user["arena_points"],
             "totalBets": user["total_bets"],
             "packsOpened": user["packs_opened"],
             "currentStreak": user["current_streak"],
@@ -417,6 +508,7 @@ def serialize_user_state(conn: Any, user_id: str) -> dict[str, Any]:
         "positions": open_positions,
         "settled": settled_positions,
         "ledger": [row_to_ledger(row) for row in ledger],
+        "pointLedger": [row_to_point_ledger(row) for row in point_ledger],
     }
 
 
@@ -458,6 +550,19 @@ def row_to_ledger(row: dict[str, Any]) -> dict[str, Any]:
         "type": row["type"],
         "amountCents": row["amount_cents"],
         "balanceAfterCents": row["balance_after_cents"],
+        "currency": row.get("currency") or "USDC",
+        "note": row.get("note") or "",
+        "createdAt": row["created_at"].isoformat(),
+    }
+
+
+def row_to_point_ledger(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "userId": row["user_id"],
+        "type": row["type"],
+        "pointsDelta": row["points_delta"],
+        "pointsAfter": row["points_after"],
         "note": row.get("note") or "",
         "createdAt": row["created_at"].isoformat(),
     }
@@ -498,16 +603,54 @@ def insert_ledger(
 ) -> None:
     conn.execute(
         """
-        INSERT INTO ledger_entries (user_id, type, amount_cents, balance_after_cents, position_id, note)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        INSERT INTO ledger_entries (user_id, type, amount_cents, balance_after_cents, currency, position_id, note)
+        VALUES (%s, %s, %s, %s, 'USDC', %s, %s)
         """,
         (user_id, entry_type, amount_cents, balance_after_cents, UUID(position_id) if position_id else None, note),
+    )
+
+
+def award_points(conn: Any, user_id: str, entry_type: str, points_delta: int, note: str | None) -> None:
+    if points_delta == 0:
+        return
+    user = conn.execute("SELECT arena_points FROM users WHERE id = %s FOR UPDATE", (user_id,)).fetchone()
+    points_after = int(user["arena_points"]) + points_delta
+    conn.execute(
+        "UPDATE users SET arena_points = %s, updated_at = now() WHERE id = %s",
+        (points_after, user_id),
+    )
+    conn.execute(
+        """
+        INSERT INTO point_entries (user_id, type, points_delta, points_after, note)
+        VALUES (%s, %s, %s, %s, %s)
+        """,
+        (user_id, entry_type, points_delta, points_after, note),
     )
 
 
 def current_balance(conn: Any, user_id: str) -> int:
     row = conn.execute("SELECT balance_cents FROM users WHERE id = %s", (user_id,)).fetchone()
     return int(row["balance_cents"]) if row else 0
+
+
+def normalize_auth_subject(payload: CreateUserPayload) -> str:
+    if payload.authSubject:
+        return payload.authSubject.strip().lower()
+    if payload.authProvider in {"sui-zklogin", "google"}:
+        return normalize_email(payload.email)
+    return payload.walletAddress.strip().lower()
+
+
+def validate_auth_payload(payload: CreateUserPayload) -> None:
+    email = normalize_email(payload.email)
+    if not email or "@" not in email:
+        raise HTTPException(status_code=422, detail="email_required")
+    if payload.authProvider in {"wallet", "zksync"} and not payload.walletAddress.strip():
+        raise HTTPException(status_code=422, detail="wallet_address_required")
+
+
+def normalize_email(value: str) -> str:
+    return value.strip().lower()
 
 
 def coerce_json(value: Any, fallback: Any) -> Any:

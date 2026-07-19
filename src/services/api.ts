@@ -2,7 +2,7 @@ import { cards } from "../../shared/cards";
 import { skillBadges } from "../../shared/badges";
 import { markets } from "../../shared/demo-data";
 import { settlePosition } from "../../shared/settlement";
-import type { CardDefinition, MatchSnapshot, PlatformUserState, PositionInput, SettledPosition } from "../../shared/types";
+import type { AuthProvider, CardDefinition, MatchSnapshot, PlatformUserState, PositionInput, SettledPosition } from "../../shared/types";
 
 export interface CatalogResponse {
   cards: CardDefinition[];
@@ -43,6 +43,9 @@ export async function settlePositionApi(position: PositionInput, match: MatchSna
 export async function createPlatformUser(payload: {
   id?: string;
   displayName: string;
+  email?: string;
+  authProvider?: AuthProvider;
+  authSubject?: string;
   walletAddress?: string;
 }): Promise<PlatformUserState> {
   const response = await fetch("/api/users", {
@@ -105,5 +108,27 @@ export async function grantPlatformCredits(payload: {
     method: "POST",
   });
   if (!response.ok) throw new Error(`Admin credit HTTP ${response.status}`);
+  return (await response.json()) as PlatformUserState;
+}
+
+export async function grantPlatformPoints(payload: {
+  targetUserId: string;
+  points: number;
+  note?: string;
+  adminToken: string;
+}): Promise<PlatformUserState> {
+  const response = await fetch("/api/admin/points", {
+    body: JSON.stringify({
+      note: payload.note,
+      points: payload.points,
+      targetUserId: payload.targetUserId,
+    }),
+    headers: {
+      "Content-Type": "application/json",
+      "X-Admin-Token": payload.adminToken,
+    },
+    method: "POST",
+  });
+  if (!response.ok) throw new Error(`Admin points HTTP ${response.status}`);
   return (await response.json()) as PlatformUserState;
 }

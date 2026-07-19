@@ -30,6 +30,9 @@ Politica de dados: veja `docs/DATA_SOURCES.md`.
 - Dados obrigatorios de partidas: TXLine.
 - Dados auxiliares gratuitos: API-FOOTBALL/OpenLigaDB/StatsBomb somente quando houver mapeamento confiavel.
 - `ALLOW_DEMO_DATA=false` em producao para nao publicar jogos ficticios.
+- Usuarios entram por fluxo simulado de Google zkLogin, ZKsync ou wallet.
+- Saldo financeiro interno e exibido como USDC e so pode ser creditado pelo admin.
+- Arena Points sao separados do saldo USDC e servem para ranking/recompensas.
 
 ## Regras implementadas
 
@@ -501,6 +504,15 @@ Creditar usuario com creditos internos da plataforma:
 
 ```text
 POST /api/admin/credits
+Header: X-Admin-Token: <ADMIN_CREDIT_SECRET>
+```
+
+O valor e informado em centavos de USDC interno (`amountCents`). Exemplo: `25000` representa `$250.00 USDC`.
+
+Creditar Arena Points por evento:
+
+```text
+POST /api/admin/points
 Header: X-Admin-Token: <ADMIN_CREDIT_SECRET>
 ```
 

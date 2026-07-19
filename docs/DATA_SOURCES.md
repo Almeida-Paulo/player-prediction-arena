@@ -11,15 +11,19 @@
 These records are created by Prediction Arena and stored in PostgreSQL:
 
 - users
+- account provider, email, auth subject, and wallet address
 - balances
 - ledger entries
+- Arena Points and point ledger entries
 - positions
 - card inventory
 - opened packs
 - settled predictions
 - leaderboard data derived from platform users
 
-New users start with zero Arena Credits. The admin distributes test credits through `POST /api/admin/credits`, protected by `ADMIN_CREDIT_SECRET`.
+New users start with zero internal USDC. The admin distributes test USDC through `POST /api/admin/credits`, protected by `ADMIN_CREDIT_SECRET`.
+
+Arena Points are separate from internal USDC. They are awarded for prediction participation, correct predictions, and settlement events, and are used for ranking and engagement rewards.
 
 ## Synthetic seed data
 

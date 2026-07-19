@@ -8,6 +8,7 @@ export interface PlatformUser {
   correctPredictions: number;
   volumeCents: number;
   wonCents: number;
+  arenaPoints: number;
 }
 
 export interface PlatformHistoryPoint {
@@ -34,6 +35,7 @@ export const platformUsers: PlatformUser[] = [
     correctPredictions: 171,
     volumeCents: 18425000,
     wonCents: 6934000,
+    arenaPoints: 24850,
   },
   {
     id: "usr-malik-reyes",
@@ -43,6 +45,7 @@ export const platformUsers: PlatformUser[] = [
     correctPredictions: 152,
     volumeCents: 16592000,
     wonCents: 5818000,
+    arenaPoints: 22140,
   },
   {
     id: "usr-sofia-chen",
@@ -52,6 +55,7 @@ export const platformUsers: PlatformUser[] = [
     correctPredictions: 146,
     volumeCents: 14936000,
     wonCents: 6245000,
+    arenaPoints: 21420,
   },
   {
     id: "usr-lucas-moretti",
@@ -61,6 +65,7 @@ export const platformUsers: PlatformUser[] = [
     correctPredictions: 124,
     volumeCents: 13280000,
     wonCents: 4772000,
+    arenaPoints: 18390,
   },
   {
     id: "usr-priya-nair",
@@ -70,6 +75,7 @@ export const platformUsers: PlatformUser[] = [
     correctPredictions: 119,
     volumeCents: 11945000,
     wonCents: 4390000,
+    arenaPoints: 17660,
   },
   {
     id: "usr-diego-silva",
@@ -79,6 +85,7 @@ export const platformUsers: PlatformUser[] = [
     correctPredictions: 106,
     volumeCents: 10388000,
     wonCents: 3826000,
+    arenaPoints: 15830,
   },
   {
     id: "usr-hana-novak",
@@ -88,6 +95,7 @@ export const platformUsers: PlatformUser[] = [
     correctPredictions: 98,
     volumeCents: 8846000,
     wonCents: 3511000,
+    arenaPoints: 14170,
   },
 ];
 
@@ -114,7 +122,7 @@ export function getPlatformMarketActivity(match: MatchSnapshot, market: MarketDe
   };
 }
 
-export function rankPlatformUsersBy(metric: "predictions" | "wonCents" | "correctPredictions"): PlatformUser[] {
+export function rankPlatformUsersBy(metric: "predictions" | "wonCents" | "correctPredictions" | "arenaPoints"): PlatformUser[] {
   return [...platformUsers].sort((a, b) => b[metric] - a[metric]);
 }
 

@@ -178,6 +178,7 @@ export interface SettledPosition extends PositionInput {
 
 export interface UserProgress {
   balanceCents: number;
+  arenaPoints: number;
   totalBets: number;
   packsOpened: number;
   currentStreak: number;
@@ -193,14 +194,30 @@ export interface PlatformLedgerEntry {
   type: "admin_credit" | "stake" | "payout" | "pack" | "adjustment";
   amountCents: number;
   balanceAfterCents: number;
+  currency: "USDC";
   note?: string;
   createdAt: string;
 }
+
+export interface PlatformPointEntry {
+  id: string;
+  userId: string;
+  type: "prediction_entry" | "correct_prediction" | "oracle_settlement" | "event_bonus" | "adjustment";
+  pointsDelta: number;
+  pointsAfter: number;
+  note?: string;
+  createdAt: string;
+}
+
+export type AuthProvider = "sui-zklogin" | "google" | "zksync" | "wallet";
 
 export interface PlatformUserState {
   user: {
     id: string;
     displayName: string;
+    email: string;
+    authProvider: AuthProvider;
+    authSubject: string;
     walletAddress: string;
     role: "admin" | "player";
   };
@@ -209,4 +226,5 @@ export interface PlatformUserState {
   positions: PositionInput[];
   settled: SettledPosition[];
   ledger: PlatformLedgerEntry[];
+  pointLedger: PlatformPointEntry[];
 }

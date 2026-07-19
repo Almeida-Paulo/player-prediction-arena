@@ -76,11 +76,11 @@ References:
 
 Production rule: do not display fake lineup players or fake logos while this mapping is missing.
 
-## Platform credits
+## Platform USDC credits
 
-The platform has internal test credits in PostgreSQL. These are not blockchain tokens.
+The platform has internal USDC-denominated test credits in PostgreSQL. These are not real USDC transfers yet and there is no checkout flow.
 
-New users start with `0` credits. An admin distributes credits through:
+New users start with `0` USDC. An admin distributes internal USDC credits through:
 
 ```text
 POST /api/admin/credits
@@ -98,11 +98,36 @@ The frontend sends this value as:
 X-Admin-Token: <ADMIN_CREDIT_SECRET>
 ```
 
-Every credit, stake, payout, and starter pack action is recorded in `ledger_entries`.
+Every USDC credit, stake, payout, and adjustment is recorded in `ledger_entries` with `currency='USDC'`.
+
+Arena Points are separate from USDC. They are stored on `users.arena_points` and recorded in `point_entries`. The current scoring model is:
+
+- `+10 AP` for placing a prediction.
+- `+25 AP` for each TXLine-backed settlement.
+- `+100 AP` for each correct prediction.
+
+These points power ranking and engagement rewards; they are not a withdrawable balance.
+
+Admins can also grant event points through:
+
+```text
+POST /api/admin/points
+X-Admin-Token: <ADMIN_CREDIT_SECRET>
+```
+
+## Account simulation
+
+The current app simulates account creation with:
+
+- Google zkLogin, modeled after Sui zkLogin.
+- ZKsync wallet/smart-account path.
+- Standard wallet address.
+
+The database stores `email`, `auth_provider`, `auth_subject`, and `wallet_address`. Real OAuth, zkLogin proof verification, and wallet signature verification are not enabled yet; the schema is prepared so those checks can replace the current demo flow.
 
 ## Real vs platform-generated data
 
 - Real match fixtures, scores, status, and odds: TXLine/TXODDS.
 - Real lineups, logos, statistics, and ratings: API-FOOTBALL when configured.
-- Platform data: users, balances, positions, card inventory, ledger, volume, leaderboard, and prediction history.
+- Platform data: users, auth method, email, USDC balances, Arena Points, positions, card inventory, ledger, volume, leaderboard, and prediction history.
 - Synthetic seed data: only the initial liquidity/activity used to make the hackathon market graph readable before enough real users trade.
