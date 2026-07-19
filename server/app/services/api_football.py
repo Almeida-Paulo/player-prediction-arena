@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -39,71 +39,6 @@ async def hydrate_api_football_details(
         transfers = await fetch_match_transfers(base, headers, candidate, client)
         if transfers:
             match["transfers"] = transfers
-
-
-async def fetch_api_football_match_backfill(
-    client: httpx.AsyncClient,
-    settings: Settings,
-    matches: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    if not settings.api_football_key:
-        return []
-
-    base = settings.api_football_base.rstrip("/")
-    headers = {"Accept": "application/json", "x-apisports-key": settings.api_football_key}
-    dates = api_backfill_dates(matches)
-    if not dates:
-        return []
-
-    fixture_batches = await asyncio.gather(
-        *(fetch_fixtures_for_date(base, headers, settings, match_date, client) for match_date in dates),
-    )
-    fixtures = [fixture for batch in fixture_batches for fixture in batch]
-    if not fixtures:
-        return []
-
-    output: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for fixture in fixtures:
-        match = map_api_fixture_snapshot(fixture)
-        if not match:
-            continue
-        identity = api_fixture_identity(match)
-        if identity in seen:
-            continue
-        seen.add(identity)
-
-        api_fixture_id = str(match.get("detailProviderFixtureId") or "").replace("api-football:", "")
-        detailed_fixture = await fetch_fixture_bundle(base, headers, api_fixture_id, client) if api_fixture_id else None
-        if detailed_fixture:
-            apply_fixture_details(match, detailed_fixture)
-            transfers = await fetch_match_transfers(base, headers, detailed_fixture, client)
-            if transfers:
-                match["transfers"] = transfers
-        output.append(match)
-    return output
-
-
-def api_backfill_dates(matches: list[dict[str, Any]], days_before: int = 5, days_after: int = 1) -> list[str]:
-    anchors: list[date] = []
-    for match in matches:
-        match_date = api_match_date(match.get("startTime"))
-        if not match_date:
-            continue
-        try:
-            anchors.append(date.fromisoformat(match_date))
-        except ValueError:
-            continue
-
-    if not anchors:
-        anchors.append(datetime.now(timezone.utc).date())
-
-    start = min(anchors) - timedelta(days=days_before)
-    end = max(anchors) + timedelta(days=days_after)
-    if (end - start).days > 10:
-        start = end - timedelta(days=10)
-
-    return [(start + timedelta(days=offset)).isoformat() for offset in range((end - start).days + 1)]
 
 
 async def fetch_fixtures_for_date(
@@ -272,73 +207,6 @@ async def fetch_transfers_for_team(
     return output
 
 
-def map_api_fixture_snapshot(fixture: dict[str, Any]) -> dict[str, Any] | None:
-    fixture_meta = fixture.get("fixture", {}) if isinstance(fixture.get("fixture"), dict) else {}
-    teams = fixture.get("teams", {}) if isinstance(fixture.get("teams"), dict) else {}
-    league = fixture.get("league", {}) if isinstance(fixture.get("league"), dict) else {}
-    goals = fixture.get("goals", {}) if isinstance(fixture.get("goals"), dict) else {}
-
-    fixture_id = str(fixture_meta.get("id") or "")
-    home_team = teams.get("home") if isinstance(teams.get("home"), dict) else {}
-    away_team = teams.get("away") if isinstance(teams.get("away"), dict) else {}
-    home = str(home_team.get("name") or "")
-    away = str(away_team.get("name") or "")
-    if not fixture_id or not home or not away:
-        return None
-
-    status = normalize_api_status((fixture_meta.get("status") or {}).get("short")) or "SCHEDULED"
-    start_time = api_fixture_time_ms(fixture_meta.get("date"))
-    home_score = safe_int(goals.get("home"))
-    away_score = safe_int(goals.get("away"))
-    return {
-        "id": f"api-football:{fixture_id}",
-        "home": home,
-        "away": away,
-        "homeCode": team_code(home),
-        "awayCode": team_code(away),
-        "homeLogoUrl": home_team.get("logo"),
-        "awayLogoUrl": away_team.get("logo"),
-        "competition": league.get("name") or "World Cup",
-        "round": clean_api_round(league.get("round")),
-        "startTime": start_time,
-        "minute": normalize_api_minute(fixture_meta.get("status"), status),
-        "status": status,
-        "score": {home: home_score, away: away_score},
-        "stats": {
-            home: {"possession": 50, "shotsAgainst": 0, "cornersAgainst": 0},
-            away: {"possession": 50, "shotsAgainst": 0, "cornersAgainst": 0},
-        },
-        "ratings": {},
-        "mom": home,
-        "source": "api-football",
-        "oracleProof": f"api-football:{fixture_id}",
-        "detailProviderFixtureId": fixture_id,
-        "detailSource": "api-football",
-        "events": [],
-        "odds": [],
-    }
-
-
-def api_fixture_time_ms(value: Any) -> int | None:
-    if not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return int(parsed.timestamp() * 1000)
-
-
-def clean_api_round(value: Any) -> str | None:
-    normalized = str(value or "").replace("World Cup -", "").strip()
-    return normalized or None
-
-
-def api_fixture_identity(match: dict[str, Any]) -> str:
-    teams = sorted([normalize_team_name(match.get("home")), normalize_team_name(match.get("away"))])
-    return f"{':'.join(teams)}:{api_match_date(match.get('startTime')) or ''}"
-
-
 def find_matching_fixture(fixtures: list[dict[str, Any]], match: dict[str, Any]) -> dict[str, Any] | None:
     home = normalize_team_name(match.get("home"))
     away = normalize_team_name(match.get("away"))
@@ -356,7 +224,6 @@ def find_matching_fixture(fixtures: list[dict[str, Any]], match: dict[str, Any])
 def apply_fixture_details(match: dict[str, Any], fixture: dict[str, Any]) -> None:
     fixture_meta = fixture.get("fixture", {}) if isinstance(fixture.get("fixture"), dict) else {}
     teams = fixture.get("teams", {}) if isinstance(fixture.get("teams"), dict) else {}
-    goals = fixture.get("goals", {}) if isinstance(fixture.get("goals"), dict) else {}
 
     api_fixture_id = fixture_meta.get("id")
     if api_fixture_id:
@@ -374,16 +241,6 @@ def apply_fixture_details(match: dict[str, Any], fixture: dict[str, Any]) -> Non
         match["homeLogoUrl"] = home_team.get("logo")
     if not match.get("awayLogoUrl") and isinstance(away_team, dict):
         match["awayLogoUrl"] = away_team.get("logo")
-
-    status = normalize_api_status((fixture_meta.get("status") or {}).get("short"))
-    if status:
-        match["status"] = status
-        match["minute"] = normalize_api_minute(fixture_meta.get("status"), status)
-
-    home_score = goals.get("home")
-    away_score = goals.get("away")
-    if home_score is not None and away_score is not None:
-        match["score"] = {match["home"]: safe_int(home_score), match["away"]: safe_int(away_score)}
 
     lineups = map_lineups(fixture.get("lineups"), match)
     if lineups:
@@ -549,27 +406,6 @@ def api_match_date(value: Any) -> str | None:
     return date.date().isoformat()
 
 
-def normalize_api_status(value: Any) -> str | None:
-    raw = str(value or "").upper()
-    if raw in {"FT", "AET", "PEN"}:
-        return "FINAL"
-    if raw in {"1H", "HT", "2H", "ET", "BT", "P"}:
-        return "LIVE"
-    if raw in {"NS", "TBD"}:
-        return "SCHEDULED"
-    return None
-
-
-def normalize_api_minute(status: Any, normalized: str) -> str:
-    if normalized == "FINAL":
-        return "FT"
-    if normalized == "SCHEDULED":
-        return "0'"
-    if isinstance(status, dict) and status.get("elapsed"):
-        return f"{status['elapsed']}'"
-    return "LIVE"
-
-
 def match_team_name(value: str, match: dict[str, Any]) -> str | None:
     normalized = normalize_team_name(value)
     if normalized == normalize_team_name(match.get("home")):
@@ -581,30 +417,6 @@ def match_team_name(value: str, match: dict[str, Any]) -> str | None:
 
 def normalize_team_name(value: Any) -> str:
     return "".join(char for char in str(value or "").lower() if char.isalnum())
-
-
-def team_code(name: str) -> str:
-    explicit = {
-        "argentina": "ARG",
-        "brazil": "BRA",
-        "england": "ENG",
-        "france": "FRA",
-        "spain": "SPA",
-        "netherlands": "NLD",
-        "portugal": "POR",
-        "germany": "GER",
-        "italy": "ITA",
-        "mexico": "MEX",
-        "united states": "USA",
-    }
-    normalized = str(name or "").strip().lower()
-    if normalized in explicit:
-        return explicit[normalized]
-    clean = "".join(char for char in str(name or "").upper() if char.isalnum() or char.isspace()).strip()
-    parts = clean.split()
-    if len(parts) > 1:
-        return "".join(part[0] for part in parts[:3])[:3]
-    return clean[:3]
 
 
 def normalize_stat_name(value: Any) -> str:

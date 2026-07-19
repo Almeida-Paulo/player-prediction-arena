@@ -8,7 +8,7 @@ import httpx
 
 from ..config import Settings
 from ..db import get_pool
-from .api_football import fetch_api_football_match_backfill, hydrate_api_football_details
+from .api_football import hydrate_api_football_details
 
 logger = logging.getLogger(__name__)
 _txline_odds_tables_ready = False
@@ -57,12 +57,10 @@ async def fetch_txline_matches(settings: Settings) -> list[dict[str, Any]] | Non
             world_cup_matches = [mapped for item, mapped in mapped_pairs if is_world_cup_fixture(item)]
             matches = world_cup_matches or [mapped for _, mapped in mapped_pairs]
             if matches:
+                await hydrate_score_snapshots(client, base, settings, guest_jwt, matches)
                 await hydrate_odds_snapshots(client, base, settings, guest_jwt, matches)
                 try:
                     await hydrate_api_football_details(client, settings, matches)
-                    api_backfill = await fetch_api_football_match_backfill(client, settings, matches)
-                    if api_backfill:
-                        matches = merge_match_collections(matches, api_backfill)
                 except Exception as exc:
                     logger.warning("Unable to hydrate API-FOOTBALL details: %s", exc)
                 save_txline_match_snapshots(matches)
@@ -91,7 +89,7 @@ async def fetch_fixtures_snapshot(
     settings: Settings,
     guest_jwt: str,
 ) -> httpx.Response:
-    params: dict[str, str] = {}
+    params: dict[str, str | int] = {"startEpochDay": fixture_start_epoch_day()}
     if settings.txline_competition_id:
         params["competitionId"] = settings.txline_competition_id
 
@@ -112,7 +110,9 @@ async def fetch_odds_snapshot(
     settings: Settings,
     guest_jwt: str,
     fixture_id: str,
+    as_of: int | None = None,
 ) -> list[dict[str, Any]]:
+    params = {"asOf": as_of} if as_of else None
     try:
         response = await client.get(
             f"{base}/api/odds/snapshot/{fixture_id}",
@@ -121,6 +121,7 @@ async def fetch_odds_snapshot(
                 "Authorization": f"Bearer {guest_jwt}",
                 "X-Api-Token": settings.txline_api_token,
             },
+            params=params,
             timeout=5,
         )
         if response.status_code >= 400:
@@ -133,8 +134,78 @@ async def fetch_odds_snapshot(
         return [item for item in payload if isinstance(item, dict)]
     if isinstance(payload, dict):
         data = payload.get("data", [])
-        return [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+        return [data] if isinstance(data, dict) else []
     return []
+
+
+async def fetch_scores_snapshot(
+    client: httpx.AsyncClient,
+    base: str,
+    settings: Settings,
+    guest_jwt: str,
+    fixture_id: str,
+    historical: bool = False,
+) -> list[dict[str, Any]]:
+    endpoint = "historical" if historical else "snapshot"
+    try:
+        response = await client.get(
+            f"{base}/api/scores/{endpoint}/{fixture_id}",
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {guest_jwt}",
+                "X-Api-Token": settings.txline_api_token,
+            },
+            timeout=6,
+        )
+        if response.status_code >= 400:
+            return []
+        payload = response.json()
+    except (httpx.HTTPError, ValueError):
+        return []
+
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        data = payload.get("data", [])
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+        return [data] if isinstance(data, dict) else []
+    return []
+
+
+async def hydrate_score_snapshots(
+    client: httpx.AsyncClient,
+    base: str,
+    settings: Settings,
+    guest_jwt: str,
+    matches: list[dict[str, Any]],
+) -> None:
+    await asyncio.gather(
+        *(
+            hydrate_score_snapshot(client, base, settings, guest_jwt, match)
+            for match in matches[:8]
+        )
+    )
+
+
+async def hydrate_score_snapshot(
+    client: httpx.AsyncClient,
+    base: str,
+    settings: Settings,
+    guest_jwt: str,
+    match: dict[str, Any],
+) -> None:
+    fixture_id = str(match.get("id") or "")
+    if not fixture_id.isdigit():
+        return
+
+    score_items = await fetch_scores_snapshot(client, base, settings, guest_jwt, fixture_id)
+    if not score_items and match_started(match):
+        score_items = await fetch_scores_snapshot(client, base, settings, guest_jwt, fixture_id, historical=True)
+    if score_items:
+        apply_txline_score_snapshot(match, score_items)
 
 
 async def hydrate_odds_snapshots(
@@ -164,6 +235,10 @@ async def hydrate_odds_snapshot(
         return
 
     odds_items = await fetch_odds_snapshot(client, base, settings, guest_jwt, fixture_id)
+    if not odds_items:
+        as_of = prematch_as_of(match)
+        if as_of:
+            odds_items = await fetch_odds_snapshot(client, base, settings, guest_jwt, fixture_id, as_of=as_of)
     mapped_odds = [mapped for item in odds_items for mapped in map_txline_odds(item, match)]
     if mapped_odds:
         sorted_odds = sorted(mapped_odds, key=odds_sort_key)[:24]
@@ -668,6 +743,132 @@ def is_txline_fixture_id(value: Any) -> bool:
     return str(value or "").isdigit()
 
 
+def fixture_start_epoch_day(lookback_days: int = 7) -> int:
+    return current_epoch_day_utc() - lookback_days
+
+
+def current_epoch_day_utc() -> int:
+    return int(datetime.now(timezone.utc).timestamp() // 86_400)
+
+
+def now_ms() -> int:
+    return int(datetime.now(timezone.utc).timestamp() * 1000)
+
+
+def match_started(match: dict[str, Any]) -> bool:
+    start_time = safe_int(match.get("startTime"))
+    return bool(start_time and start_time <= now_ms())
+
+
+def match_age_ms(match: dict[str, Any]) -> int:
+    start_time = safe_int(match.get("startTime"))
+    return now_ms() - start_time if start_time else 0
+
+
+def prematch_as_of(match: dict[str, Any]) -> int | None:
+    start_time = safe_int(match.get("startTime"))
+    if not start_time or start_time > now_ms():
+        return None
+    return max(0, start_time - 60_000)
+
+
+def apply_txline_score_snapshot(match: dict[str, Any], score_items: list[dict[str, Any]]) -> None:
+    latest = max(score_items, key=score_sort_key)
+    participant_1_score, participant_2_score = score_pair_from_txline_score(latest)
+    if participant_1_score is not None and participant_2_score is not None:
+        participant_1_is_home = bool(match.get("txlineParticipant1IsHome", True))
+        home_score, away_score = (
+            (participant_1_score, participant_2_score)
+            if participant_1_is_home
+            else (participant_2_score, participant_1_score)
+        )
+        match["score"] = {match["home"]: home_score, match["away"]: away_score}
+
+    status = normalize_score_status(latest, match)
+    if status:
+        match["status"] = status
+        match["minute"] = score_minute(latest, status)
+    match["scoreProof"] = f"txline-score:{match.get('id')}:{first_value(latest, 'id', 'seq', 'ts', 'Ts') or 'snapshot'}"
+
+
+def score_sort_key(item: dict[str, Any]) -> tuple[int, int]:
+    return (safe_int(first_value(item, "ts", "Ts")), safe_int(first_value(item, "seq", "Seq", "id", "Id")))
+
+
+def score_pair_from_txline_score(item: dict[str, Any]) -> tuple[int | None, int | None]:
+    score = first_value(item, "score", "Score")
+    if not isinstance(score, dict):
+        return None, None
+    return participant_score(score, "Participant1"), participant_score(score, "Participant2")
+
+
+def participant_score(score: dict[str, Any], participant_key: str) -> int | None:
+    participant = first_value(score, participant_key, participant_key.lower(), participant_key.replace("Participant", "participant"))
+    if not isinstance(participant, dict):
+        return None
+
+    for path in [
+        ("Total", "Score"),
+        ("total", "score"),
+        ("FT", "Score"),
+        ("FullTime", "Score"),
+        ("Current", "Score"),
+        ("Period", "Score"),
+        ("Score",),
+        ("score",),
+        ("Goals",),
+        ("goals",),
+    ]:
+        value = nested_value(participant, path)
+        if value not in (None, ""):
+            return safe_int(value)
+    return None
+
+
+def nested_value(item: dict[str, Any], path: tuple[str, ...]) -> Any:
+    current: Any = item
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def normalize_score_status(item: dict[str, Any], match: dict[str, Any]) -> str | None:
+    raw = " ".join(
+        str(first_value(item, key) or "")
+        for key in ["gameState", "GameState", "action", "Action", "status", "Status", "statusSoccerId", "StatusSoccerId"]
+    ).lower()
+    if any(term in raw for term in ["final", "finished", "complete", "closed", "settled", "fulltime", "full_time", "game_finalised"]):
+        return "FINAL"
+    if any(term in raw for term in ["live", "running", "inplay", "period", "half", "started"]):
+        return "LIVE"
+
+    game_state = str(first_value(item, "gameState", "GameState") or "").lower()
+    if game_state == "1":
+        return "SCHEDULED"
+    if game_state == "2":
+        return "LIVE"
+    if game_state in {"3", "4", "5"}:
+        return "FINAL" if match_started(match) else "LIVE"
+
+    participant_1_score, participant_2_score = score_pair_from_txline_score(item)
+    if participant_1_score is not None and participant_2_score is not None and match_age_ms(match) > 3 * 60 * 60 * 1000:
+        return "FINAL"
+    return None
+
+
+def score_minute(item: dict[str, Any], status: str) -> str:
+    if status == "FINAL":
+        return "FT"
+    clock = first_value(item, "clock", "Clock")
+    if isinstance(clock, dict):
+        seconds = safe_int(first_value(clock, "seconds", "Seconds"))
+        if seconds:
+            return f"{max(1, seconds // 60)}'"
+    return "LIVE" if status == "LIVE" else "0'"
+
+
 def merge_match_snapshot(
     cached: dict[str, Any] | None,
     incoming: dict[str, Any],
@@ -772,10 +973,15 @@ def parse_bool(value: Any, default: bool) -> bool:
 def normalize_status(item: dict[str, Any]) -> str:
     value = first_value(item, "status", "Status", "GameState", "gameState")
     raw = str(value or "").lower()
-    if raw in {"2", "3", "4", "5"} or any(term in raw for term in ["live", "running", "inplay", "period"]):
-        return "LIVE"
     if any(term in raw for term in ["final", "finished", "complete", "closed", "settled"]):
         return "FINAL"
+    if raw == "1":
+        return "SCHEDULED"
+    if raw == "2" or any(term in raw for term in ["live", "running", "inplay", "period"]):
+        return "LIVE"
+    if raw in {"3", "4", "5"}:
+        start_time = safe_int(first_value(item, "StartTime", "startTime", "start_time"))
+        return "FINAL" if start_time and start_time <= now_ms() else "LIVE"
     return "SCHEDULED"
 
 

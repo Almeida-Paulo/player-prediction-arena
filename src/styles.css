@@ -383,10 +383,10 @@ p {
   background: #ffffff;
   cursor: pointer;
   display: grid;
-  gap: 10px;
-  grid-template-columns: 54px minmax(0, 1fr) 54px;
-  min-height: 72px;
-  padding: 7px 11px;
+  gap: 8px;
+  grid-template-columns: 50px minmax(0, 1fr) 50px;
+  min-height: 66px;
+  padding: 6px 10px;
   text-align: center;
 }
 
@@ -402,15 +402,15 @@ p {
 .fixture-side {
   align-items: center;
   display: grid;
-  gap: 4px;
+  gap: 5px;
   justify-items: center;
   min-width: 0;
 }
 
 .fixture-side span {
-  color: #343b43;
+  color: #303840;
   font-size: 13px;
-  font-weight: 720;
+  font-weight: 690;
   letter-spacing: 0;
   line-height: 1;
 }
@@ -420,9 +420,9 @@ p {
   border-radius: 2px;
   box-shadow: 0 0 0 1px rgba(24, 35, 43, 0.08);
   display: block;
-  height: 25px;
+  height: 22px;
   object-fit: cover;
-  width: 38px;
+  width: 34px;
 }
 
 .fixture-flag.logo {
@@ -450,8 +450,8 @@ p {
 .fixture-card-center > span,
 .fixture-card-center small {
   color: #4d5863;
-  font-size: 11px;
-  font-weight: 620;
+  font-size: 10.5px;
+  font-weight: 560;
   line-height: 1.05;
   max-width: 100%;
   overflow: hidden;
@@ -461,15 +461,15 @@ p {
 
 .fixture-card-center small {
   color: var(--muted);
-  font-size: 10.5px;
+  font-size: 10px;
 }
 
 .fixture-card-center strong {
   align-items: center;
   color: #343b43;
   display: inline-flex;
-  font-size: 24px;
-  font-weight: 720;
+  font-size: 23px;
+  font-weight: 690;
   gap: 4px;
   justify-content: center;
   letter-spacing: 0;
@@ -488,7 +488,7 @@ p {
 }
 
 .fixture-result-card.is-scheduled .fixture-card-center strong {
-  font-size: 23px;
+  font-size: 22px;
 }
 
 .transfer-panel {

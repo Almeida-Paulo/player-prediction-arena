@@ -2957,11 +2957,12 @@ function formatFixtureCardTime(value?: string | number): string {
   if (!value) return "TBA";
   const date = typeof value === "number" ? new Date(value) : new Date(value);
   if (Number.isNaN(date.getTime())) return "TBA";
-  return date.toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    hour12: false,
-    minute: "2-digit",
-  });
+  return date
+    .toLocaleTimeString("en-US", {
+      hour: "numeric",
+      hour12: true,
+    })
+    .replace(/\s/g, "");
 }
 
 function formatFixtureDate(value?: string | number): string {
