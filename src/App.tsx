@@ -717,7 +717,7 @@ export function App() {
                     Create market
                   </button>
                 }
-                eyebrow={isLoading ? "Loading fixtures" : `${marketItems.length} admin and user markets`}
+                eyebrow={isLoading ? "Loading fixtures" : ""}
                 title="More World Cup predictions"
               />
               {marketItems.length ? (
@@ -883,7 +883,6 @@ function FeaturedMarket({
           </div>
         </div>
         <div className="icon-actions">
-          <span className="creator-pill">Admin market</span>
           <button aria-label="Copy market link" type="button">
             <Link2 size={18} />
           </button>
@@ -1198,7 +1197,7 @@ function MarketCard({
       <div className="card-title-row">
         <MarketGlyph market={item.market} match={item.match} />
         <div>
-          <span>{creatorLabel(item.market)}</span>
+          <span>{item.match.home} vs {item.match.away}</span>
           <strong>{marketQuestion(item.market, item.match)}</strong>
         </div>
       </div>
@@ -1245,17 +1244,18 @@ function MarketCard({
 }
 
 function MarketCardOdds({ odds }: { odds: MatchSnapshot["odds"] }) {
-  const firstOdd = resultOdds(odds ?? [])[0];
-  if (!firstOdd) {
+  const visibleOdds = resultOdds(odds ?? []);
+  if (!visibleOdds.length) {
     return null;
   }
   return (
     <div className="mini-odds">
-      <span>TXODDS 1X2</span>
-      <strong>
-        {firstOdd.shortLabel ? `${firstOdd.shortLabel} ${firstOdd.selection}` : firstOdd.selection}
-      </strong>
-      <em>{formatResultOdd(firstOdd)}</em>
+      {visibleOdds.map((odd) => (
+        <span className="mini-odd-cell" key={odd.id}>
+          <small>{shortResultOddsLabel(odd)}</small>
+          <strong>{formatResultOdd(odd)}</strong>
+        </span>
+      ))}
     </div>
   );
 }
@@ -1961,7 +1961,7 @@ function SectionTitle({ action, eyebrow, title }: { action?: ReactNode; eyebrow:
   return (
     <div className="section-title">
       <div>
-        <span>{eyebrow}</span>
+        {eyebrow ? <span>{eyebrow}</span> : null}
         <h2>{title}</h2>
       </div>
       {action}
@@ -2824,9 +2824,11 @@ function shortOddsLabel(odd: NonNullable<MatchSnapshot["odds"]>[number]): string
   return "";
 }
 
-function creatorLabel(market: MarketDefinition): string {
-  const creator = market.createdBy || "Prediction Arena";
-  return market.creatorRole === "user" ? `User market by ${creator}` : `Admin market by ${creator}`;
+function shortResultOddsLabel(odd: NonNullable<MatchSnapshot["odds"]>[number]): string {
+  if (odd.selectionRole === "home") return "1";
+  if (odd.selectionRole === "draw") return "Draw";
+  if (odd.selectionRole === "away") return "2";
+  return odd.shortLabel || "";
 }
 
 function numericStat(value: string): number {

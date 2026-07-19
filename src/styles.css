@@ -564,19 +564,6 @@ p {
   background: var(--surface-hover);
 }
 
-.creator-pill {
-  align-items: center;
-  background: var(--accent-soft);
-  border: 1px solid rgba(0, 169, 90, 0.18);
-  border-radius: 999px;
-  color: var(--accent-dark);
-  display: inline-flex;
-  font-size: 12px;
-  font-weight: 760;
-  min-height: 32px;
-  padding: 0 11px;
-}
-
 .match-switcher {
   align-items: center;
   background: var(--surface-soft);
@@ -1671,42 +1658,44 @@ p {
 }
 
 .mini-odds {
-  background: var(--surface-soft);
+  background: #ffffff;
   border: 1px solid var(--line);
   border-radius: 9px;
   display: grid;
+  gap: 5px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 6px;
+}
+
+.mini-odd-cell {
+  background: var(--surface-soft);
+  border: 1px solid #edf1f4;
+  border-radius: 7px;
+  display: grid;
   gap: 2px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  padding: 8px 10px;
+  min-width: 0;
+  padding: 6px 7px;
 }
 
-.mini-odds span {
+.mini-odd-cell small {
   color: var(--muted);
+  display: block;
   font-size: 10px;
-  font-weight: 820;
-  grid-column: 1 / -1;
-  text-transform: uppercase;
-}
-
-.mini-odds strong {
-  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.mini-odds em {
+.mini-odd-cell strong {
   color: var(--accent-dark);
   font-size: 12px;
-  font-style: normal;
-  font-weight: 850;
-}
-
-.mini-odds.is-empty {
-  color: var(--muted);
-  display: block;
-  font-size: 12px;
-  font-weight: 720;
+  font-weight: 820;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mini-outcomes div {
