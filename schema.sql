@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS users (
   auth_subject TEXT NOT NULL DEFAULT '',
   wallet_address TEXT NOT NULL DEFAULT '',
   role TEXT NOT NULL DEFAULT 'player',
+  email_verified_at TIMESTAMPTZ,
+  last_login_at TIMESTAMPTZ,
   balance_cents INTEGER NOT NULL DEFAULT 0,
   arena_points INTEGER NOT NULL DEFAULT 0,
   total_bets INTEGER NOT NULL DEFAULT 0,
@@ -26,6 +28,8 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider TEXT NOT NULL DEFAULT '
 ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_subject TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_address TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'player';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS balance_cents INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS arena_points INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS total_bets INTEGER NOT NULL DEFAULT 0;
@@ -100,6 +104,48 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_users_auth_identity
   ON users(auth_provider, auth_subject)
   WHERE auth_subject <> '';
 
+CREATE TABLE IF NOT EXISTS user_auth_identities (
+  provider TEXT NOT NULL,
+  auth_subject TEXT NOT NULL,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (provider, auth_subject)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_auth_identities_user
+  ON user_auth_identities(user_id);
+
+CREATE TABLE IF NOT EXISTS auth_challenges (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  provider TEXT NOT NULL,
+  email TEXT NOT NULL,
+  display_name TEXT NOT NULL DEFAULT 'Prediction Arena Player',
+  wallet_address TEXT NOT NULL DEFAULT '',
+  nonce TEXT NOT NULL,
+  message TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  consumed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_challenges_expiry
+  ON auth_challenges(expires_at);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_user
+  ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_token_hash
+  ON sessions(token_hash);
+
 CREATE TABLE IF NOT EXISTS point_entries (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -147,3 +193,16 @@ CREATE TABLE IF NOT EXISTS txline_odds_history (
 
 CREATE INDEX IF NOT EXISTS idx_txline_odds_history_fixture_time
   ON txline_odds_history(fixture_id, source_ts DESC);
+
+CREATE TABLE IF NOT EXISTS match_snapshots (
+  fixture_id TEXT PRIMARY KEY,
+  match_json JSONB NOT NULL,
+  source TEXT NOT NULL DEFAULT 'txline',
+  status TEXT,
+  start_time BIGINT,
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_match_snapshots_start_time
+  ON match_snapshots(start_time DESC);

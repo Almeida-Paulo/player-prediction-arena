@@ -18,7 +18,8 @@ class Settings(BaseSettings):
     api_football_key: str = ""
     api_football_league_id: str = "1"
     api_football_season: str = "2026"
-    admin_credit_secret: str = ""
+    admin_emails: str = ""
+    google_client_id: str = ""
     openligadb_base: str = "https://api.openligadb.de"
     allow_demo_data: bool = False
 

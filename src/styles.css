@@ -209,19 +209,20 @@ p {
 
 .usdc-icon {
   align-items: center;
-  background: #2775ca;
-  border: 2px solid #ffffff;
   border-radius: 999px;
   box-shadow: 0 0 0 1px rgba(39, 117, 202, 0.18);
-  color: #ffffff;
   display: inline-flex;
   flex: 0 0 auto;
-  font-size: 17px;
-  font-weight: 850;
   height: 34px;
   justify-content: center;
-  line-height: 1;
+  overflow: hidden;
   width: 34px;
+}
+
+.usdc-icon img {
+  display: block;
+  height: 100%;
+  width: 100%;
 }
 
 .user-menu-wrap {
@@ -351,6 +352,7 @@ p {
 .insight-panel,
 .account-card,
 .balance-hero,
+.fixture-result-card,
 .prediction-card,
 .empty-state {
   background: var(--surface);
@@ -364,6 +366,81 @@ p {
   gap: 24px;
   min-height: 480px;
   padding: 28px;
+}
+
+.fixture-results-strip {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.fixture-result-card {
+  background: #fff;
+  cursor: pointer;
+  display: grid;
+  gap: 7px;
+  min-height: 118px;
+  padding: 13px 14px;
+  text-align: center;
+}
+
+.fixture-result-card.is-selected {
+  border-color: rgba(0, 169, 90, 0.36);
+  box-shadow: 0 0 0 1px rgba(0, 169, 90, 0.12), var(--shadow);
+}
+
+.fixture-card-status {
+  color: var(--muted);
+  display: grid;
+  gap: 2px;
+  line-height: 1.1;
+}
+
+.fixture-card-status span {
+  font-size: 11px;
+  font-weight: 720;
+}
+
+.fixture-card-status strong {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.fixture-score-row,
+.fixture-team-row {
+  align-items: center;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+}
+
+.fixture-score-row strong {
+  color: #343b43;
+  font-size: 25px;
+  font-weight: 760;
+  min-width: 92px;
+}
+
+.fixture-score-row .team-avatar:first-child,
+.fixture-team-row span:first-child {
+  justify-self: end;
+}
+
+.fixture-score-row .team-avatar:last-child,
+.fixture-team-row span:last-child {
+  justify-self: start;
+}
+
+.fixture-team-row {
+  color: #343b43;
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.fixture-result-card small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
 }
 
 .featured-toolbar,
@@ -1165,7 +1242,7 @@ p {
 .auth-option-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .auth-option {
@@ -1198,6 +1275,26 @@ p {
 .auth-option.is-selected {
   border-color: rgba(0, 169, 90, 0.45);
   box-shadow: inset 0 0 0 2px rgba(0, 169, 90, 0.12);
+}
+
+.google-auth-box {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px dashed var(--line-strong);
+  border-radius: 12px;
+  display: grid;
+  justify-items: center;
+  min-height: 92px;
+  padding: 16px;
+}
+
+.google-auth-box p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+  margin: 0;
+  max-width: 420px;
+  text-align: center;
 }
 
 .auth-summary {
@@ -1546,38 +1643,107 @@ p {
   white-space: nowrap;
 }
 
-.match-data-strip {
+.match-summary-card {
   background: #ffffff;
   border: 1px solid var(--line);
   border-radius: 10px;
   display: grid;
-  gap: 8px;
-  grid-template-columns: 82px 1fr minmax(0, 1.4fr);
+  gap: 12px;
   margin-top: 12px;
-  padding: 10px;
+  padding: 12px;
 }
 
-.match-data-strip div {
+.match-summary-score {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+}
+
+.summary-team {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+  justify-content: flex-end;
   min-width: 0;
 }
 
-.match-data-strip span {
-  color: var(--muted);
-  display: block;
-  font-size: 10px;
-  font-weight: 780;
-  line-height: 1;
-  margin-bottom: 5px;
-  text-transform: uppercase;
+.summary-team.away {
+  justify-content: flex-start;
 }
 
-.match-data-strip strong {
-  display: block;
+.summary-team strong {
   font-size: 13px;
-  font-weight: 820;
+  font-weight: 760;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.summary-scoreline {
+  min-width: 66px;
+  text-align: center;
+}
+
+.summary-scoreline span,
+.summary-scoreline em {
+  color: var(--muted);
+  display: block;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 650;
+  line-height: 1.1;
+}
+
+.summary-scoreline strong {
+  color: #636b74;
+  display: block;
+  font-size: 27px;
+  font-weight: 760;
+  line-height: 1.05;
+  margin: 2px 0;
+}
+
+.summary-goals {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.goal-column {
+  color: var(--muted);
+  display: grid;
+  font-size: 11px;
+  font-weight: 650;
+  gap: 2px;
+  line-height: 1.25;
+}
+
+.goal-column:first-child {
+  text-align: right;
+}
+
+.goal-column.is-empty {
+  color: var(--faint);
+  font-style: italic;
+}
+
+.summary-meta-row {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 11px;
+  font-weight: 650;
+  gap: 8px 12px;
+  padding-top: 10px;
+}
+
+.summary-meta-row span {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
 }
 
 .lineup-subhead {
@@ -1951,7 +2117,7 @@ p {
   align-items: end;
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(0, 1fr) 130px 130px minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) 130px 130px auto auto;
 }
 
 .credit-grid .signup-button,
@@ -2519,7 +2685,7 @@ p {
   .trade-inputs,
   .trade-actions,
   .lineup-stats,
-  .match-data-strip,
+  .fixture-results-strip,
   .stableprice-strip,
   .prediction-grid,
   .insight-column,
@@ -2532,6 +2698,15 @@ p {
   .credit-grid,
   .ledger-row {
     grid-template-columns: 1fr;
+  }
+
+  .fixture-result-card {
+    min-height: 104px;
+  }
+
+  .fixture-score-row strong {
+    font-size: 22px;
+    min-width: 82px;
   }
 
   .ticket-metrics {

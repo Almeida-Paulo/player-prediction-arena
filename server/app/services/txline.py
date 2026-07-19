@@ -61,9 +61,11 @@ async def fetch_txline_matches(settings: Settings) -> list[dict[str, Any]] | Non
                     await hydrate_api_football_details(client, settings, matches)
                 except Exception as exc:
                     logger.warning("Unable to hydrate API-FOOTBALL details: %s", exc)
-            return matches or None
+                save_txline_match_snapshots(matches)
+                matches = merge_cached_matches(matches)
+            return matches or load_txline_match_snapshots() or None
     except (httpx.HTTPError, RuntimeError):
-        return None
+        return load_txline_match_snapshots() or None
 
 
 async def start_guest_session(client: httpx.AsyncClient, base: str) -> str | None:
@@ -412,6 +414,25 @@ def ensure_txline_odds_tables() -> bool:
                   ON txline_odds_history(fixture_id, source_ts DESC)
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS match_snapshots (
+                  fixture_id TEXT PRIMARY KEY,
+                  match_json JSONB NOT NULL,
+                  source TEXT NOT NULL DEFAULT 'txline',
+                  status TEXT,
+                  start_time BIGINT,
+                  fetched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_match_snapshots_start_time
+                  ON match_snapshots(start_time DESC)
+                """
+            )
         _txline_odds_tables_ready = True
         return True
     except Exception as exc:
@@ -502,6 +523,83 @@ def load_txline_odds_snapshot(fixture_id: str) -> list[dict[str, Any]]:
             return []
         return [item for item in loaded if isinstance(item, dict)] if isinstance(loaded, list) else []
     return []
+
+
+def save_txline_match_snapshots(matches: list[dict[str, Any]]) -> None:
+    if not matches or not ensure_txline_odds_tables():
+        return
+    try:
+        with get_pool().connection() as conn:
+            for match in matches:
+                fixture_id = str(match.get("id") or "")
+                if not fixture_id:
+                    continue
+                conn.execute(
+                    """
+                    INSERT INTO match_snapshots (fixture_id, match_json, source, status, start_time, fetched_at, updated_at)
+                    VALUES (%s, %s::jsonb, %s, %s, %s, now(), now())
+                    ON CONFLICT (fixture_id) DO UPDATE SET
+                      match_json = EXCLUDED.match_json,
+                      source = EXCLUDED.source,
+                      status = EXCLUDED.status,
+                      start_time = EXCLUDED.start_time,
+                      fetched_at = EXCLUDED.fetched_at,
+                      updated_at = now()
+                    """,
+                    (
+                        fixture_id,
+                        json.dumps(match),
+                        str(match.get("source") or "txline"),
+                        str(match.get("status") or ""),
+                        safe_int_or_none(match.get("startTime")),
+                    ),
+                )
+    except Exception as exc:
+        logger.warning("Unable to save TXLine match snapshots: %s", exc)
+
+
+def load_txline_match_snapshots(limit: int = 12) -> list[dict[str, Any]]:
+    if not ensure_txline_odds_tables():
+        return []
+    try:
+        with get_pool().connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT match_json
+                FROM match_snapshots
+                ORDER BY COALESCE(start_time, 0) DESC, updated_at DESC
+                LIMIT %s
+                """,
+                (limit,),
+            ).fetchall()
+    except Exception as exc:
+        logger.warning("Unable to load cached TXLine match snapshots: %s", exc)
+        return []
+
+    output: list[dict[str, Any]] = []
+    for row in rows:
+        match_json = row["match_json"]
+        if isinstance(match_json, dict):
+            output.append(match_json)
+        elif isinstance(match_json, str):
+            try:
+                loaded = json.loads(match_json)
+            except ValueError:
+                continue
+            if isinstance(loaded, dict):
+                output.append(loaded)
+    return output
+
+
+def merge_cached_matches(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    cached = load_txline_match_snapshots()
+    if not cached:
+        return matches
+    merged = {str(match.get("id")): match for match in cached if match.get("id")}
+    for match in matches:
+        if match.get("id"):
+            merged[str(match["id"])] = match
+    return sorted(merged.values(), key=lambda item: safe_int(item.get("startTime")), reverse=True)
 
 
 def first_value(item: dict[str, Any], *keys: str) -> Any:

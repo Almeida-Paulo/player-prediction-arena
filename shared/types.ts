@@ -133,6 +133,8 @@ export interface MatchSnapshot {
   competition?: string;
   round?: string;
   startTime?: string | number;
+  venueName?: string;
+  venueCity?: string;
   minute: string;
   status: "SCHEDULED" | "LIVE" | "FINAL";
   score: Record<string, number>;
@@ -209,7 +211,7 @@ export interface PlatformPointEntry {
   createdAt: string;
 }
 
-export type AuthProvider = "sui-zklogin" | "google" | "zksync" | "wallet";
+export type AuthProvider = "google" | "solana" | "wallet";
 
 export interface PlatformUserState {
   user: {

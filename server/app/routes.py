@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
 import json
+import secrets
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Header, HTTPException
+import httpx
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .config import get_settings
@@ -15,6 +22,8 @@ from .services.txline import fetch_txline_matches
 
 router = APIRouter()
 _platform_tables_ready = False
+SESSION_COOKIE = "pa_session"
+SESSION_DAYS = 14
 
 
 class PositionContext(BaseModel):
@@ -34,13 +43,20 @@ class PositionPayload(BaseModel):
     cardIds: list[str] = Field(default_factory=list, max_length=3)
 
 
-class CreateUserPayload(BaseModel):
-    id: str | None = None
+class GoogleAuthPayload(BaseModel):
+    credential: str = Field(min_length=20)
+    displayName: str = Field(default="", max_length=80)
+
+
+class SolanaChallengePayload(BaseModel):
+    email: str = Field(min_length=3, max_length=160)
     displayName: str = Field(default="Prediction Arena Player", min_length=1, max_length=80)
-    email: str = Field(default="", max_length=160)
-    authProvider: Literal["sui-zklogin", "google", "zksync", "wallet"] = "wallet"
-    authSubject: str = Field(default="", max_length=180)
-    walletAddress: str = Field(default="", max_length=120)
+
+
+class SolanaVerifyPayload(BaseModel):
+    challengeId: str = Field(min_length=1)
+    walletAddress: str = Field(min_length=32, max_length=64)
+    signature: str = Field(min_length=20)
 
 
 class AdminCreditPayload(BaseModel):
@@ -103,59 +119,142 @@ async def settle(payload: PositionPayload) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.post("/users")
-async def create_user(payload: CreateUserPayload) -> dict[str, Any]:
-    validate_auth_payload(payload)
-    auth_subject = normalize_auth_subject(payload)
-    user_id = payload.id or f"user-{uuid4().hex[:10]}"
+@router.get("/me")
+async def me(request: Request) -> dict[str, Any]:
+    with get_pool().connection() as conn:
+        user = require_user_session(conn, request)
+        return serialize_user_state(conn, user["id"])
+
+
+@router.post("/auth/google")
+async def auth_google(payload: GoogleAuthPayload) -> JSONResponse:
+    settings = get_settings()
+    claims = await verify_google_credential(payload.credential, settings)
+    email = normalize_email(str(claims.get("email") or ""))
+    if not email:
+        raise HTTPException(status_code=401, detail="google_email_missing")
+
+    display_name = payload.displayName.strip() or str(claims.get("name") or email.split("@")[0])
+    auth_subject = f"google:{claims.get('sub')}"
     with get_pool().connection() as conn:
         ensure_platform_tables(conn)
-        existing = None
-        if auth_subject:
-            existing = conn.execute(
-                "SELECT id FROM users WHERE auth_provider = %s AND auth_subject = %s",
-                (payload.authProvider, auth_subject),
-            ).fetchone()
-        if existing:
-            user_id = existing["id"]
+        user_id = upsert_authenticated_user(
+            conn,
+            email=email,
+            provider="google",
+            auth_subject=auth_subject,
+            display_name=display_name,
+            wallet_address="",
+            email_verified=True,
+        )
+        return build_session_response(conn, user_id)
+
+
+@router.post("/auth/solana/challenge")
+async def auth_solana_challenge(payload: SolanaChallengePayload) -> dict[str, Any]:
+    email = normalize_email(payload.email)
+    if not email or "@" not in email:
+        raise HTTPException(status_code=422, detail="email_required")
+
+    challenge_id = str(uuid4())
+    nonce = secrets.token_urlsafe(18)
+    issued_at = datetime.now(timezone.utc).replace(microsecond=0)
+    expires_at = issued_at + timedelta(minutes=10)
+    message = "\n".join(
+        [
+            "Prediction Arena wants you to sign in with Solana.",
+            "",
+            f"Email: {email}",
+            f"Nonce: {nonce}",
+            f"Issued At: {issued_at.isoformat()}",
+        ]
+    )
+
+    with get_pool().connection() as conn:
+        ensure_platform_tables(conn)
         conn.execute(
             """
-            INSERT INTO users (
-              id, display_name, email, auth_provider, auth_subject, wallet_address, role,
-              balance_cents, arena_points, total_bets, packs_opened,
-              current_streak, best_streak, risk_managed_wins, oracle_settlements
-            ) VALUES (%s, %s, %s, %s, %s, %s, 'player', 0, 0, 0, 0, 0, 0, 0, 0)
-            ON CONFLICT (id) DO UPDATE SET
-              display_name = EXCLUDED.display_name,
-              email = EXCLUDED.email,
-              auth_provider = EXCLUDED.auth_provider,
-              auth_subject = EXCLUDED.auth_subject,
-              wallet_address = EXCLUDED.wallet_address,
-              updated_at = now()
+            INSERT INTO auth_challenges (id, provider, email, display_name, nonce, message, expires_at)
+            VALUES (%s, 'solana', %s, %s, %s, %s, %s)
             """,
-            (
-                user_id,
-                payload.displayName,
-                normalize_email(payload.email),
-                payload.authProvider,
-                auth_subject,
-                payload.walletAddress,
-            ),
+            (UUID(challenge_id), email, payload.displayName.strip(), nonce, message, expires_at),
         )
-        return serialize_user_state(conn, user_id)
+    return {"challengeId": challenge_id, "message": message, "expiresAt": expires_at.isoformat()}
+
+
+@router.post("/auth/solana/verify")
+async def auth_solana_verify(payload: SolanaVerifyPayload) -> JSONResponse:
+    try:
+        challenge_uuid = UUID(payload.challengeId)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail="invalid_challenge_id") from exc
+
+    with get_pool().connection() as conn:
+        ensure_platform_tables(conn)
+        challenge = conn.execute(
+            """
+            SELECT id::text, email, display_name, message
+            FROM auth_challenges
+            WHERE id = %s
+              AND provider = 'solana'
+              AND consumed_at IS NULL
+              AND expires_at > now()
+            FOR UPDATE
+            """,
+            (challenge_uuid,),
+        ).fetchone()
+        if not challenge:
+            raise HTTPException(status_code=401, detail="challenge_expired")
+
+        if not verify_solana_signature(payload.walletAddress, payload.signature, challenge["message"]):
+            raise HTTPException(status_code=401, detail="invalid_solana_signature")
+
+        conn.execute("UPDATE auth_challenges SET consumed_at = now() WHERE id = %s", (challenge_uuid,))
+        user_id = upsert_authenticated_user(
+            conn,
+            email=challenge["email"],
+            provider="solana",
+            auth_subject=f"solana:{payload.walletAddress}",
+            display_name=challenge["display_name"] or "Prediction Arena Player",
+            wallet_address=payload.walletAddress,
+            email_verified=False,
+        )
+        return build_session_response(conn, user_id)
+
+
+@router.post("/auth/logout")
+async def auth_logout(request: Request) -> JSONResponse:
+    token = request.cookies.get(SESSION_COOKIE)
+    with get_pool().connection() as conn:
+        ensure_platform_tables(conn)
+        if token:
+            conn.execute(
+                "UPDATE sessions SET revoked_at = now() WHERE token_hash = %s",
+                (hash_session_token(token),),
+            )
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return response
+
+
+@router.post("/users")
+async def create_user() -> dict[str, Any]:
+    raise HTTPException(status_code=410, detail="use_auth_google_or_solana")
 
 
 @router.get("/users/{user_id}/state")
-async def user_state(user_id: str) -> dict[str, Any]:
+async def user_state(user_id: str, request: Request) -> dict[str, Any]:
     with get_pool().connection() as conn:
-        ensure_user(conn, user_id)
+        actor = require_user_session(conn, request)
+        require_same_user_or_admin(actor, user_id)
         return serialize_user_state(conn, user_id)
 
 
 @router.post("/users/{user_id}/positions")
-async def create_position(user_id: str, payload: PositionPayload) -> dict[str, Any]:
+async def create_position(user_id: str, payload: PositionPayload, request: Request) -> dict[str, Any]:
     with get_pool().connection() as conn:
-        ensure_user(conn, user_id)
+        actor = require_user_session(conn, request)
+        require_same_user_or_admin(actor, user_id)
         user = conn.execute("SELECT balance_cents FROM users WHERE id = %s FOR UPDATE", (user_id,)).fetchone()
         if not user or user["balance_cents"] < payload.stakeCents:
             raise HTTPException(status_code=409, detail="insufficient_balance")
@@ -208,9 +307,10 @@ async def create_position(user_id: str, payload: PositionPayload) -> dict[str, A
 
 
 @router.post("/users/{user_id}/open-pack")
-async def open_pack(user_id: str) -> dict[str, Any]:
+async def open_pack(user_id: str, request: Request) -> dict[str, Any]:
     with get_pool().connection() as conn:
-        ensure_user(conn, user_id)
+        actor = require_user_session(conn, request)
+        require_same_user_or_admin(actor, user_id)
         user = conn.execute("SELECT total_bets, packs_opened FROM users WHERE id = %s FOR UPDATE", (user_id,)).fetchone()
         if not user or user["total_bets"] < 10 or user["packs_opened"] > 0:
             raise HTTPException(status_code=409, detail="pack_not_available")
@@ -230,10 +330,11 @@ async def open_pack(user_id: str) -> dict[str, Any]:
 
 
 @router.post("/users/{user_id}/settle-match/{match_id}")
-async def settle_user_match(user_id: str, match_id: str) -> dict[str, Any]:
+async def settle_user_match(user_id: str, match_id: str, request: Request) -> dict[str, Any]:
     match = await find_match_or_404(match_id)
     with get_pool().connection() as conn:
-        ensure_user(conn, user_id)
+        actor = require_user_session(conn, request)
+        require_same_user_or_admin(actor, user_id)
         rows = conn.execute(
             """
             SELECT id::text, match_id, market_id, market_label, outcome, stake_cents, odds_bps,
@@ -324,16 +425,15 @@ async def settle_user_match(user_id: str, match_id: str) -> dict[str, Any]:
 
 
 @router.post("/admin/credits")
-async def grant_admin_credits(payload: AdminCreditPayload, x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
-    settings = get_settings()
-    if not settings.admin_credit_secret:
-        raise HTTPException(status_code=503, detail="admin_credit_secret_not_configured")
-    if x_admin_token != settings.admin_credit_secret:
-        raise HTTPException(status_code=403, detail="invalid_admin_token")
-
+async def grant_admin_credits(
+    payload: AdminCreditPayload,
+    request: Request,
+) -> dict[str, Any]:
     with get_pool().connection() as conn:
-        ensure_user(conn, payload.targetUserId)
+        require_admin_session(conn, request)
         user = conn.execute("SELECT balance_cents FROM users WHERE id = %s FOR UPDATE", (payload.targetUserId,)).fetchone()
+        if not user:
+            raise HTTPException(status_code=404, detail="target_user_not_found")
         balance_after = int(user["balance_cents"]) + payload.amountCents
         conn.execute(
             "UPDATE users SET balance_cents = %s, updated_at = now() WHERE id = %s",
@@ -344,15 +444,15 @@ async def grant_admin_credits(payload: AdminCreditPayload, x_admin_token: str | 
 
 
 @router.post("/admin/points")
-async def grant_admin_points(payload: AdminPointsPayload, x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
-    settings = get_settings()
-    if not settings.admin_credit_secret:
-        raise HTTPException(status_code=503, detail="admin_credit_secret_not_configured")
-    if x_admin_token != settings.admin_credit_secret:
-        raise HTTPException(status_code=403, detail="invalid_admin_token")
-
+async def grant_admin_points(
+    payload: AdminPointsPayload,
+    request: Request,
+) -> dict[str, Any]:
     with get_pool().connection() as conn:
-        ensure_user(conn, payload.targetUserId)
+        require_admin_session(conn, request)
+        user = conn.execute("SELECT id FROM users WHERE id = %s", (payload.targetUserId,)).fetchone()
+        if not user:
+            raise HTTPException(status_code=404, detail="target_user_not_found")
         award_points(conn, payload.targetUserId, "event_bonus", payload.points, payload.note)
         return serialize_user_state(conn, payload.targetUserId)
 
@@ -379,6 +479,8 @@ def ensure_platform_tables(conn: Any) -> None:
     conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_subject TEXT NOT NULL DEFAULT ''")
     conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_address TEXT NOT NULL DEFAULT ''")
     conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'player'")
+    conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ")
+    conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ")
     conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS arena_points INTEGER NOT NULL DEFAULT 0")
     conn.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS outcome TEXT NOT NULL DEFAULT 'yes'")
     conn.execute("ALTER TABLE positions ADD COLUMN IF NOT EXISTS gross_payout_cents INTEGER")
@@ -409,6 +511,50 @@ def ensure_platform_tables(conn: Any) -> None:
           WHERE auth_subject <> ''
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS user_auth_identities (
+          provider TEXT NOT NULL,
+          auth_subject TEXT NOT NULL,
+          user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (provider, auth_subject)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_user_auth_identities_user ON user_auth_identities(user_id)")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS auth_challenges (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          provider TEXT NOT NULL,
+          email TEXT NOT NULL,
+          display_name TEXT NOT NULL DEFAULT 'Prediction Arena Player',
+          wallet_address TEXT NOT NULL DEFAULT '',
+          nonce TEXT NOT NULL,
+          message TEXT NOT NULL,
+          expires_at TIMESTAMPTZ NOT NULL,
+          consumed_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_challenges_expiry ON auth_challenges(expires_at)")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sessions (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          token_hash TEXT NOT NULL UNIQUE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          expires_at TIMESTAMPTZ NOT NULL,
+          revoked_at TIMESTAMPTZ
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash)")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS point_entries (
@@ -443,6 +589,8 @@ def ensure_user(conn: Any, user_id: str) -> None:
 
 def serialize_user_state(conn: Any, user_id: str) -> dict[str, Any]:
     user = conn.execute("SELECT * FROM users WHERE id = %s", (user_id,)).fetchone()
+    if not user:
+        raise HTTPException(status_code=404, detail="user_not_found")
     cards = conn.execute(
         "SELECT instance_id::text, card_id, locked_match_id, acquired_at FROM user_cards WHERE user_id = %s ORDER BY acquired_at DESC",
         (user_id,),
@@ -633,20 +781,205 @@ def current_balance(conn: Any, user_id: str) -> int:
     return int(row["balance_cents"]) if row else 0
 
 
-def normalize_auth_subject(payload: CreateUserPayload) -> str:
-    if payload.authSubject:
-        return payload.authSubject.strip().lower()
-    if payload.authProvider in {"sui-zklogin", "google"}:
-        return normalize_email(payload.email)
-    return payload.walletAddress.strip().lower()
+async def verify_google_credential(credential: str, settings: Any) -> dict[str, Any]:
+    if not settings.google_client_id:
+        raise HTTPException(status_code=503, detail="google_client_id_not_configured")
+    async with httpx.AsyncClient(timeout=8) as client:
+        response = await client.get("https://oauth2.googleapis.com/tokeninfo", params={"id_token": credential})
+    if response.status_code != 200:
+        raise HTTPException(status_code=401, detail="invalid_google_credential")
+
+    data = response.json()
+    if data.get("aud") != settings.google_client_id:
+        raise HTTPException(status_code=401, detail="google_audience_mismatch")
+    if data.get("email_verified") not in (True, "true", "True", "1"):
+        raise HTTPException(status_code=401, detail="google_email_not_verified")
+    return data
 
 
-def validate_auth_payload(payload: CreateUserPayload) -> None:
-    email = normalize_email(payload.email)
-    if not email or "@" not in email:
-        raise HTTPException(status_code=422, detail="email_required")
-    if payload.authProvider in {"wallet", "zksync"} and not payload.walletAddress.strip():
-        raise HTTPException(status_code=422, detail="wallet_address_required")
+def upsert_authenticated_user(
+    conn: Any,
+    *,
+    email: str,
+    provider: str,
+    auth_subject: str,
+    display_name: str,
+    wallet_address: str,
+    email_verified: bool,
+) -> str:
+    settings = get_settings()
+    normalized_email = normalize_email(email)
+    existing_identity = conn.execute(
+        """
+        SELECT user_id
+        FROM user_auth_identities
+        WHERE provider = %s AND auth_subject = %s
+        """,
+        (provider, auth_subject),
+    ).fetchone()
+    existing_user = None
+    if existing_identity:
+        existing_user = conn.execute(
+            "SELECT id, role FROM users WHERE id = %s",
+            (existing_identity["user_id"],),
+        ).fetchone()
+    if existing_user and existing_user["role"] == "admin" and not email_verified:
+        raise HTTPException(status_code=403, detail="admin_requires_verified_email")
+    if not existing_user and email_verified:
+        existing_user = conn.execute(
+            "SELECT id, role FROM users WHERE email = %s ORDER BY created_at LIMIT 1",
+            (normalized_email,),
+        ).fetchone()
+
+    user_id = existing_user["id"] if existing_user else f"user-{uuid4().hex[:10]}"
+    next_role = role_for_email(settings, normalized_email) if email_verified else "player"
+    verified_at = datetime.now(timezone.utc) if email_verified else None
+    conn.execute(
+        """
+        INSERT INTO users (
+          id, display_name, email, auth_provider, auth_subject, wallet_address, role,
+          balance_cents, arena_points, total_bets, packs_opened,
+          current_streak, best_streak, risk_managed_wins, oracle_settlements,
+          email_verified_at, last_login_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, 0, 0, 0, 0, 0, 0, 0, 0, %s, now())
+        ON CONFLICT (id) DO UPDATE SET
+          display_name = COALESCE(NULLIF(EXCLUDED.display_name, ''), users.display_name),
+          email = EXCLUDED.email,
+          auth_provider = EXCLUDED.auth_provider,
+          auth_subject = EXCLUDED.auth_subject,
+          wallet_address = CASE
+            WHEN EXCLUDED.wallet_address <> '' THEN EXCLUDED.wallet_address
+            ELSE users.wallet_address
+          END,
+          role = CASE
+            WHEN users.role = 'admin' OR EXCLUDED.role = 'admin' THEN 'admin'
+            ELSE users.role
+          END,
+          email_verified_at = COALESCE(users.email_verified_at, EXCLUDED.email_verified_at),
+          last_login_at = now(),
+          updated_at = now()
+        """,
+        (
+            user_id,
+            display_name or "Prediction Arena Player",
+            normalized_email,
+            provider,
+            auth_subject,
+            wallet_address,
+            next_role,
+            verified_at,
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO user_auth_identities (provider, auth_subject, user_id)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (provider, auth_subject) DO UPDATE SET
+          user_id = EXCLUDED.user_id,
+          updated_at = now()
+        """,
+        (provider, auth_subject, user_id),
+    )
+    return user_id
+
+
+def build_session_response(conn: Any, user_id: str) -> JSONResponse:
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=SESSION_DAYS)
+    conn.execute(
+        """
+        INSERT INTO sessions (user_id, token_hash, expires_at)
+        VALUES (%s, %s, %s)
+        """,
+        (user_id, hash_session_token(token), expires_at),
+    )
+    response = JSONResponse(serialize_user_state(conn, user_id))
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        httponly=True,
+        max_age=SESSION_DAYS * 24 * 60 * 60,
+        path="/",
+        samesite="lax",
+        secure=get_settings().app_env == "production",
+    )
+    return response
+
+
+def require_user_session(conn: Any, request: Request) -> dict[str, Any]:
+    ensure_platform_tables(conn)
+    token = request.cookies.get(SESSION_COOKIE)
+    if not token:
+        raise HTTPException(status_code=401, detail="login_required")
+    user = conn.execute(
+        """
+        SELECT users.*
+        FROM sessions
+        JOIN users ON users.id = sessions.user_id
+        WHERE sessions.token_hash = %s
+          AND sessions.revoked_at IS NULL
+          AND sessions.expires_at > now()
+        """,
+        (hash_session_token(token),),
+    ).fetchone()
+    if not user:
+        raise HTTPException(status_code=401, detail="login_required")
+    return user
+
+
+def require_same_user_or_admin(actor: dict[str, Any], user_id: str) -> None:
+    if actor["id"] != user_id and actor.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="forbidden")
+
+
+def require_admin_session(conn: Any, request: Request) -> dict[str, Any]:
+    actor = require_user_session(conn, request)
+    if actor.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="admin_login_required")
+    return actor
+
+
+def hash_session_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def role_for_email(settings: Any, email: str) -> str:
+    admin_emails = {item.strip().lower() for item in settings.admin_emails.split(",") if item.strip()}
+    return "admin" if normalize_email(email) in admin_emails else "player"
+
+
+def verify_solana_signature(public_key: str, signature: str, message: str) -> bool:
+    try:
+        from nacl.exceptions import BadSignatureError
+        from nacl.signing import VerifyKey
+    except ImportError as exc:
+        raise HTTPException(status_code=503, detail="solana_signature_verifier_not_installed") from exc
+
+    try:
+        public_key_bytes = decode_base58(public_key)
+        signature_bytes = base64.b64decode(signature, validate=True)
+    except (ValueError, TypeError, binascii.Error):
+        return False
+    if len(public_key_bytes) != 32 or len(signature_bytes) != 64:
+        return False
+    try:
+        VerifyKey(public_key_bytes).verify(message.encode("utf-8"), signature_bytes)
+        return True
+    except BadSignatureError:
+        return False
+
+
+def decode_base58(value: str) -> bytes:
+    alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+    number = 0
+    for char in value:
+        index = alphabet.find(char)
+        if index < 0:
+            raise ValueError("invalid_base58")
+        number = number * 58 + index
+    output = number.to_bytes((number.bit_length() + 7) // 8, "big") if number else b""
+    leading_zeroes = len(value) - len(value.lstrip("1"))
+    return b"\0" * leading_zeroes + output
 
 
 def normalize_email(value: str) -> str:

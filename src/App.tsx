@@ -15,6 +15,7 @@ import {
   LifeBuoy,
   Link2,
   LockKeyhole,
+  MapPin,
   Medal,
   PackageOpen,
   Search,
@@ -25,11 +26,12 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import worldCupLogo from "../assets/fifa-world-cup-2026-logo-footylogos.svg";
 import predictionLogo from "../assets/Prediction-Arena-logo.png";
 import txoddsLogo from "../assets/TxODDS-Blue-on-Transparent-300x60.png.webp";
+import usdcLogo from "../assets/usd-coin-usdc-logo.svg";
 import { skillBadges } from "../shared/badges";
 import { cards as cardCatalog, starterPackPool } from "../shared/cards";
 import { markets as marketCatalog } from "../shared/demo-data";
@@ -39,6 +41,7 @@ import type {
   CardType,
   AuthProvider,
   MarketDefinition,
+  MatchEvent,
   MatchSnapshot,
   PlatformLedgerEntry,
   PlatformPointEntry,
@@ -56,16 +59,38 @@ import {
 } from "./platform-activity";
 import {
   createPlatformPosition,
-  createPlatformUser,
+  createSolanaChallenge,
   getCatalog,
+  getCurrentUser,
   getMatches,
-  getPlatformUserState,
   grantPlatformCredits,
   grantPlatformPoints,
+  logoutPlatformUser,
   openPlatformPack,
   settlePlatformMatch,
   settlePositionApi,
+  signInWithGoogle,
+  verifySolanaChallenge,
 } from "./services/api";
+
+interface SolanaWalletProvider {
+  connect: () => Promise<{ publicKey: { toString: () => string } }>;
+  signMessage?: (message: Uint8Array, encoding?: "utf8") => Promise<Uint8Array | { signature: Uint8Array }>;
+}
+
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (config: { client_id: string; callback: (response: { credential?: string }) => void }) => void;
+          renderButton: (element: HTMLElement, options: Record<string, string>) => void;
+        };
+      };
+    };
+    solana?: SolanaWalletProvider;
+  }
+}
 
 interface AppState {
   connected: boolean;
@@ -104,16 +129,12 @@ interface MarketActivity {
   history: PlatformHistoryPoint[];
 }
 
-interface AuthFormPayload {
-  provider: AuthProvider;
+interface SolanaAuthPayload {
   displayName: string;
   email: string;
-  walletAddress: string;
-  authSubject: string;
 }
 
-const STORAGE_KEY = "player-prediction-arena-ts";
-const USER_ID_STORAGE_KEY = "prediction-arena-user-id";
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? "";
 
 const initialProgress: UserProgress = {
   balanceCents: 0,
@@ -151,24 +172,19 @@ const initialState: AppState = {
 const categories = ["World Cup", "Crypto", "Politics", "Finance", "Culture", "Technology", "Climate"];
 
 const authOptions: Array<{
-  provider: AuthProvider;
+  provider: "google" | "solana";
   label: string;
   detail: string;
 }> = [
   {
-    provider: "sui-zklogin",
-    label: "Google zkLogin",
-    detail: "Sui-style onboarding with email and a web3 account.",
+    provider: "google",
+    label: "Google",
+    detail: "Fast account creation with a verified Gmail or Google Workspace email.",
   },
   {
-    provider: "zksync",
-    label: "ZKsync",
-    detail: "EVM smart account path for account abstraction.",
-  },
-  {
-    provider: "wallet",
-    label: "Wallet",
-    detail: "Connect with a browser wallet address.",
+    provider: "solana",
+    label: "Solana wallet",
+    detail: "Connect Phantom, Solflare or Backpack and sign a secure login message.",
   },
 ];
 
@@ -176,7 +192,7 @@ export function App() {
   const [matches, setMatches] = useState<MatchSnapshot[]>([]);
   const [markets, setMarkets] = useState<MarketDefinition[]>(marketCatalog);
   const [allCards, setAllCards] = useState<CardDefinition[]>(cardCatalog);
-  const [state, setState] = useState<AppState>(() => loadState());
+  const [state, setState] = useState<AppState>(initialState);
   const [stake, setStake] = useState(5000);
   const [momentCardId, setMomentCardId] = useState("");
   const [powerCardId, setPowerCardId] = useState("");
@@ -228,8 +244,20 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }, [state]);
+    let active = true;
+    getCurrentUser()
+      .then((platformState) => {
+        if (!active) return;
+        setState((current) => mergePlatformState(current, platformState, { connected: true }));
+      })
+      .catch(() => {
+        if (!active) return;
+        setState((current) => clearUserState(current));
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const selectedMatch = useMemo(
     () => matches.find((match) => match.id === state.selectedMatchId) ?? matches[0],
@@ -272,27 +300,13 @@ export function App() {
   const highestVolumeItems = useMemo(() => rankVolumeMarkets(marketItems, state).slice(0, 3), [marketItems, state]);
 
   async function connectWallet() {
-    const existingUserId = state.userId || localStorage.getItem(USER_ID_STORAGE_KEY) || "";
-    if (!existingUserId) {
-      setAuthMode("login");
-      return;
-    }
-    const nextUserId = existingUserId || `user-${crypto.randomUUID().slice(0, 8)}`;
     try {
-      const platformState = await getPlatformUserState(existingUserId);
-      localStorage.setItem(USER_ID_STORAGE_KEY, platformState.user.id);
+      const platformState = await getCurrentUser();
       setState((current) => mergePlatformState(current, platformState, { connected: true }));
       setActiveView("home");
-      showToast("Session connected. Account state loaded from PostgreSQL.");
+      showToast("Session connected.");
     } catch {
-      setState((current) => ({
-        ...current,
-        connected: true,
-        userId: nextUserId,
-        walletAddress: current.walletAddress || demoWalletAddress(nextUserId),
-      }));
-      setActiveView("home");
-      showToast("Session connected locally. Backend user state is unavailable.");
+      setAuthMode("login");
     }
   }
 
@@ -300,46 +314,47 @@ export function App() {
     setAuthMode("signup");
   }
 
-  async function submitAuth(payload: AuthFormPayload) {
-    const nextUserId = `user-${crypto.randomUUID().slice(0, 8)}`;
-    const walletAddress = payload.walletAddress || demoWalletAddress(`${payload.provider}:${payload.email}`);
+  async function submitGoogleCredential(credential: string) {
     try {
-      const platformState = await createPlatformUser({
-        authProvider: payload.provider,
-        authSubject: payload.authSubject || authSubjectFor(payload.provider, payload.email, walletAddress),
-        displayName: payload.displayName,
-        email: payload.email,
-        id: nextUserId,
-        walletAddress,
-      });
-      localStorage.setItem(USER_ID_STORAGE_KEY, platformState.user.id);
+      const platformState = await signInWithGoogle({ credential });
       setState((current) => mergePlatformState(current, platformState, { connected: true }));
       setAuthMode(null);
       setActiveView("home");
-      showToast("Account ready. Admin-funded USDC is required before placing predictions.");
-    } catch {
-      const authSubject = payload.authSubject || authSubjectFor(payload.provider, payload.email, walletAddress);
-      setState((current) => ({
-        ...current,
-        authProvider: payload.provider,
-        authSubject,
-        connected: true,
-        displayName: payload.displayName,
-        email: payload.email,
-        userId: nextUserId,
-        walletAddress,
-      }));
-      setAuthMode(null);
-      setActiveView("home");
-      showToast("Account created locally. Backend user state is unavailable.");
+      showToast("Google account connected.");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Unable to sign in with Google.");
     }
   }
 
-  function disconnectWallet() {
-    setState((current) => ({ ...current, connected: false }));
+  async function submitSolanaAuth(payload: SolanaAuthPayload) {
+    try {
+      if (!window.solana) throw new Error("Install Phantom, Solflare or another Solana wallet first.");
+      const connection = await window.solana.connect();
+      const walletAddress = connection.publicKey.toString();
+      if (!window.solana.signMessage) throw new Error("This Solana wallet cannot sign login messages.");
+      const challenge = await createSolanaChallenge(payload);
+      const signed = await window.solana.signMessage(new TextEncoder().encode(challenge.message), "utf8");
+      const signature = bytesToBase64(signed instanceof Uint8Array ? signed : signed.signature);
+      const platformState = await verifySolanaChallenge({
+        challengeId: challenge.challengeId,
+        signature,
+        walletAddress,
+      });
+      setState((current) => mergePlatformState(current, platformState, { connected: true }));
+      setAuthMode(null);
+      setActiveView("home");
+      showToast("Solana wallet verified.");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Unable to sign in with Solana.");
+    }
+  }
+
+  async function disconnectWallet() {
+    await logoutPlatformUser();
+    setState((current) => clearUserState(current));
     setActiveView("home");
     setUserMenuOpen(false);
-    showToast("Session disconnected.");
+    showToast("Signed out.");
   }
 
   function selectMatch(matchId: string) {
@@ -373,7 +388,7 @@ export function App() {
     const targetMarket = markets.find((market) => market.id === targetMarketId) ?? selectedMarket;
     if (!selectedMatch || !targetMarket) return showToast("Select an available World Cup market.");
     if (stake <= 0) return showToast("Stake must be greater than zero.");
-    if (stake > state.progress.balanceCents) return showToast("Insufficient USDC balance.");
+    if (stake > state.progress.balanceCents) return showToast("Insufficient balance.");
 
     const blockedCard = selectedCards.find((card) => lockedForMatch.has(card.id));
     if (blockedCard) return showToast(`${blockedCard.name} is already locked for this match.`);
@@ -415,7 +430,7 @@ export function App() {
             selectedMarketId: targetMarket.id,
           }),
         );
-        showToast("Prediction placed. USDC balance, cards and history were saved.");
+        showToast("Prediction placed. Balance, cards and history were saved.");
         return;
       } catch (error) {
         return showToast(error instanceof Error ? error.message : "Unable to place prediction.");
@@ -525,10 +540,9 @@ export function App() {
     showToast(`Starter Pack opened: ${awarded.map((id) => allCards.find((card) => card.id === id)?.name).join(", ")}.`);
   }
 
-  async function grantCredits(targetUserId: string, amountCents: number, adminToken: string) {
+  async function grantCredits(targetUserId: string, amountCents: number) {
     try {
       const platformState = await grantPlatformCredits({
-        adminToken,
         amountCents,
         note: "Hackathon demo credit",
         targetUserId,
@@ -542,10 +556,9 @@ export function App() {
     }
   }
 
-  async function grantPoints(targetUserId: string, points: number, adminToken: string) {
+  async function grantPoints(targetUserId: string, points: number) {
     try {
       const platformState = await grantPlatformPoints({
-        adminToken,
         note: "Hackathon event points",
         points,
         targetUserId,
@@ -668,6 +681,14 @@ export function App() {
               </div>
             )}
 
+            {matches.length > 0 && (
+              <MatchResultsStrip
+                matches={matches}
+                selectedMatchId={selectedMatch?.id ?? ""}
+                onSelect={selectMatch}
+              />
+            )}
+
             {selectedMatch && (
               <div className="mobile-lineup-wrapper">
                 <LineupPreview match={selectedMatch} />
@@ -759,7 +780,9 @@ export function App() {
         <AuthModal
           mode={authMode}
           onClose={() => setAuthMode(null)}
-          onSubmit={submitAuth}
+          onGoogleCredential={submitGoogleCredential}
+          onShowToast={showToast}
+          onSolanaSubmit={submitSolanaAuth}
         />
       )}
 
@@ -1055,6 +1078,50 @@ function OutcomeRow({
   );
 }
 
+function MatchResultsStrip({
+  matches,
+  selectedMatchId,
+  onSelect,
+}: {
+  matches: MatchSnapshot[];
+  selectedMatchId: string;
+  onSelect: (matchId: string) => void;
+}) {
+  return (
+    <section className="fixture-results-strip" aria-label="World Cup match results">
+      {matches.slice(0, 6).map((match) => {
+        const homeScore = match.score[match.home] ?? 0;
+        const awayScore = match.score[match.away] ?? 0;
+        return (
+          <button
+            className={`fixture-result-card ${match.id === selectedMatchId ? "is-selected" : ""}`}
+            key={match.id}
+            type="button"
+            onClick={() => onSelect(match.id)}
+          >
+            <div className="fixture-card-status">
+              <span>{match.round || matchStatusLabel(match)}</span>
+              <strong>{matchStatusLabel(match)}</strong>
+            </div>
+            <div className="fixture-score-row">
+              <TeamAvatar code={match.homeCode} logoUrl={match.homeLogoUrl} />
+              <strong>
+                {match.status === "SCHEDULED" ? formatFixtureTime(match.startTime) : `${homeScore} - ${awayScore}`}
+              </strong>
+              <TeamAvatar code={match.awayCode} logoUrl={match.awayLogoUrl} />
+            </div>
+            <div className="fixture-team-row">
+              <span>{match.homeCode}</span>
+              <span>{match.awayCode}</span>
+            </div>
+            <small>{formatFixtureDate(match.startTime)}</small>
+          </button>
+        );
+      })}
+    </section>
+  );
+}
+
 function MarketCard({
   activity,
   isSelected,
@@ -1133,7 +1200,7 @@ function LineupPreview({ match }: { match: MatchSnapshot }) {
         <TeamCompact code={match.homeCode} logoUrl={match.homeLogoUrl} name={match.home} />
         <TeamCompact alignRight code={match.awayCode} logoUrl={match.awayLogoUrl} name={match.away} />
       </div>
-      <MatchDataStrip match={match} />
+      <MatchSummaryCard match={match} />
       <div className="lineup-subhead">
         <span>{title}</span>
         <strong>{formatStart(match.startTime)}</strong>
@@ -1162,25 +1229,63 @@ function LineupPreview({ match }: { match: MatchSnapshot }) {
   );
 }
 
-function MatchDataStrip({ match }: { match: MatchSnapshot }) {
+function MatchSummaryCard({ match }: { match: MatchSnapshot }) {
   const homeScore = match.score[match.home] ?? 0;
   const awayScore = match.score[match.away] ?? 0;
+  const homeGoals = match.events.filter((event) => event.type === "goal" && sameTeam(event.team, match.home));
+  const awayGoals = match.events.filter((event) => event.type === "goal" && sameTeam(event.team, match.away));
+  const venue = [match.venueName, match.venueCity].filter(Boolean).join(", ");
   return (
-    <div className="match-data-strip">
-      <div>
-        <span>{match.status}</span>
-        <strong>
-          {homeScore} - {awayScore}
-        </strong>
+    <section className="match-summary-card">
+      <div className="match-summary-score">
+        <div className="summary-team">
+          <strong>{match.home}</strong>
+          <TeamAvatar code={match.homeCode} logoUrl={match.homeLogoUrl} />
+        </div>
+        <div className="summary-scoreline">
+          <span>{matchStatusLabel(match)}</span>
+          <strong>{match.status === "SCHEDULED" ? formatFixtureTime(match.startTime) : `${homeScore} - ${awayScore}`}</strong>
+          <em>{match.status === "SCHEDULED" ? "Kickoff" : match.minute}</em>
+        </div>
+        <div className="summary-team away">
+          <TeamAvatar code={match.awayCode} logoUrl={match.awayLogoUrl} />
+          <strong>{match.away}</strong>
+        </div>
       </div>
-      <div>
-        <span>{match.status === "SCHEDULED" ? "Kickoff" : "Minute"}</span>
-        <strong>{match.status === "SCHEDULED" ? formatStart(match.startTime) : match.minute}</strong>
+      <div className="summary-goals">
+        <GoalColumn events={homeGoals} />
+        <GoalColumn events={awayGoals} />
       </div>
-      <div>
-        <span>Fixture proof</span>
-        <strong>{match.oracleProof ?? `txline:${match.id}`}</strong>
+      <div className="summary-meta-row">
+        <span>
+          <Clock3 size={13} />
+          {formatStart(match.startTime)}
+        </span>
+        <span>
+          <Trophy size={13} />
+          {match.competition ?? "World Cup"}
+        </span>
+        {venue && (
+          <span>
+            <MapPin size={13} />
+            {venue}
+          </span>
+        )}
+        <span>Data: {match.detailSource ? "TXLine + API-FOOTBALL" : match.source.toUpperCase()}</span>
       </div>
+    </section>
+  );
+}
+
+function GoalColumn({ events }: { events: MatchEvent[] }) {
+  if (!events.length) return <div className="goal-column is-empty">No goals listed</div>;
+  return (
+    <div className="goal-column">
+      {events.slice(0, 5).map((event, index) => (
+        <span key={`${event.player}-${event.minute}-${index}`}>
+          {event.player} {formatGoalMinute(event.minute)}
+        </span>
+      ))}
     </div>
   );
 }
@@ -1252,8 +1357,8 @@ function AccountScreen({
   packAvailable: boolean;
   state: AppState;
   userId: string;
-  onGrantCredits: (targetUserId: string, amountCents: number, adminToken: string) => void;
-  onGrantPoints: (targetUserId: string, points: number, adminToken: string) => void;
+  onGrantCredits: (targetUserId: string, amountCents: number) => void;
+  onGrantPoints: (targetUserId: string, points: number) => void;
   onOpenPack: () => void;
   onSelectView: (view: AccountView) => void;
   onShowToast: (message: string) => void;
@@ -1324,7 +1429,7 @@ function AccountScreen({
                 <UsdcIcon />
                 <div>
                   <span>Available balance</span>
-                  <strong>{formatCents(state.progress.balanceCents)}</strong>
+                  <strong>{formatUsdcCents(state.progress.balanceCents)}</strong>
                 </div>
               </div>
               <div className="balance-hero points-hero">
@@ -1367,12 +1472,14 @@ function AccountScreen({
                 <PointLedgerList pointLedger={state.pointLedger} />
               </div>
             </div>
-            <CreditDesk
-              defaultTargetUserId={userId}
-              ledger={state.ledger}
-              onGrantCredits={onGrantCredits}
-              onGrantPoints={onGrantPoints}
-            />
+            {state.role === "admin" && (
+              <CreditDesk
+                defaultTargetUserId={userId}
+                ledger={state.ledger}
+                onGrantCredits={onGrantCredits}
+                onGrantPoints={onGrantPoints}
+              />
+            )}
           </div>
         )}
 
@@ -1438,19 +1545,50 @@ function MenuItem({ icon, label, onClick }: { icon: ReactNode; label: string; on
 function AuthModal({
   mode,
   onClose,
-  onSubmit,
+  onGoogleCredential,
+  onShowToast,
+  onSolanaSubmit,
 }: {
   mode: AuthMode;
   onClose: () => void;
-  onSubmit: (payload: AuthFormPayload) => void;
+  onGoogleCredential: (credential: string) => void;
+  onShowToast: (message: string) => void;
+  onSolanaSubmit: (payload: SolanaAuthPayload) => void;
 }) {
-  const [provider, setProvider] = useState<AuthProvider>("sui-zklogin");
+  const [provider, setProvider] = useState<"google" | "solana">("google");
   const [displayName, setDisplayName] = useState("Prediction Arena Player");
   const [email, setEmail] = useState("");
-  const [walletAddress, setWalletAddress] = useState("");
+  const googleSlotRef = useRef<HTMLDivElement | null>(null);
   const selected = authOptions.find((option) => option.provider === provider) ?? authOptions[0];
-  const needsWallet = provider === "wallet" || provider === "zksync";
-  const canSubmit = Boolean(displayName.trim() && email.trim() && (!needsWallet || walletAddress.trim()));
+  const canSubmitSolana = Boolean(displayName.trim() && email.trim());
+
+  useEffect(() => {
+    if (provider !== "google" || !GOOGLE_CLIENT_ID || !googleSlotRef.current) return;
+    let active = true;
+    loadGoogleIdentity()
+      .then(() => {
+        if (!active || !window.google || !googleSlotRef.current) return;
+        googleSlotRef.current.innerHTML = "";
+        window.google.accounts.id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          callback: (response) => {
+            if (response.credential) onGoogleCredential(response.credential);
+          },
+        });
+        window.google.accounts.id.renderButton(googleSlotRef.current, {
+          logo_alignment: "left",
+          shape: "pill",
+          size: "large",
+          text: mode === "signup" ? "signup_with" : "signin_with",
+          theme: "outline",
+          width: "320",
+        });
+      })
+      .catch(() => onShowToast("Google Identity could not be loaded."));
+    return () => {
+      active = false;
+    };
+  }, [mode, onGoogleCredential, onShowToast, provider]);
 
   return (
     <div className="card-modal-backdrop" role="presentation" onMouseDown={onClose}>
@@ -1464,7 +1602,7 @@ function AuthModal({
         <div className="card-modal-header">
           <div>
             <span>{mode === "signup" ? "Create account" : "Login"}</span>
-            <h2 id="auth-modal-title">Choose your account path</h2>
+            <h2 id="auth-modal-title">Choose how to continue</h2>
           </div>
           <button aria-label="Close account dialog" type="button" onClick={onClose}>
             <X size={20} />
@@ -1479,68 +1617,62 @@ function AuthModal({
               type="button"
               onClick={() => setProvider(option.provider)}
             >
-              {option.provider === "sui-zklogin" ? <Mail size={18} /> : <ShieldCheck size={18} />}
+              {option.provider === "google" ? <Mail size={18} /> : <ShieldCheck size={18} />}
               <strong>{option.label}</strong>
               <span>{option.detail}</span>
             </button>
           ))}
         </div>
 
-        <div className="profile-grid">
-          <label className="field">
-            <span>Display name</span>
-            <input
-              placeholder="Your public username"
-              value={displayName}
-              onChange={(event) => setDisplayName(event.target.value)}
-            />
-          </label>
-          <label className="field">
-            <span>Email</span>
-            <input
-              placeholder="you@example.com"
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-            />
-          </label>
-          <label className={`field ${needsWallet ? "" : "wide"}`}>
-            <span>{needsWallet ? "Wallet address" : "Derived account"}</span>
-            <input
-              placeholder={needsWallet ? "0x..." : "Generated from email for the demo"}
-              readOnly={!needsWallet}
-              value={needsWallet ? walletAddress : authSubjectFor(provider, email, "")}
-              onChange={(event) => setWalletAddress(event.target.value)}
-            />
-          </label>
-        </div>
+        {provider === "google" ? (
+          <div className="google-auth-box">
+            <div ref={googleSlotRef} />
+            {!GOOGLE_CLIENT_ID && (
+              <p>Google login needs `VITE_GOOGLE_CLIENT_ID` in the frontend environment and `GOOGLE_CLIENT_ID` on the API.</p>
+            )}
+          </div>
+        ) : (
+          <div className="profile-grid">
+            <label className="field">
+              <span>Display name</span>
+              <input
+                placeholder="Your public username"
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span>Email</span>
+              <input
+                placeholder="you@example.com"
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+            </label>
+          </div>
+        )}
 
         <div className="auth-summary">
-          <UsdcIcon />
+          <ShieldCheck size={22} />
           <div>
-            <strong>Admin-funded USDC balance</strong>
-            <span>{selected.label} only creates the account. Deposits come from the admin credit desk for now.</span>
+            <strong>Admin-funded account balance</strong>
+            <span>{selected.label} creates a real platform account. Deposits still come from an admin for this release.</span>
           </div>
         </div>
 
         <div className="card-modal-footer">
           <span>{selected.label}</span>
-          <button
-            className="signup-button"
-            disabled={!canSubmit}
-            type="button"
-            onClick={() =>
-              onSubmit({
-                authSubject: authSubjectFor(provider, email, walletAddress),
-                displayName,
-                email,
-                provider,
-                walletAddress,
-              })
-            }
-          >
-            {mode === "signup" ? "Create account" : "Continue"}
-          </button>
+          {provider === "solana" && (
+            <button
+              className="signup-button"
+              disabled={!canSubmitSolana}
+              type="button"
+              onClick={() => onSolanaSubmit({ displayName, email })}
+            >
+              Sign with Solana
+            </button>
+          )}
         </div>
       </section>
     </div>
@@ -1555,13 +1687,12 @@ function CreditDesk({
 }: {
   defaultTargetUserId: string;
   ledger: PlatformLedgerEntry[];
-  onGrantCredits: (targetUserId: string, amountCents: number, adminToken: string) => void;
-  onGrantPoints: (targetUserId: string, points: number, adminToken: string) => void;
+  onGrantCredits: (targetUserId: string, amountCents: number) => void;
+  onGrantPoints: (targetUserId: string, points: number) => void;
 }) {
   const [targetUserId, setTargetUserId] = useState(defaultTargetUserId);
   const [amount, setAmount] = useState(250);
   const [points, setPoints] = useState(500);
-  const [adminToken, setAdminToken] = useState("");
 
   useEffect(() => {
     setTargetUserId(defaultTargetUserId);
@@ -1595,28 +1726,19 @@ function CreditDesk({
             onChange={(event) => setPoints(Math.max(0, Number(event.target.value)))}
           />
         </label>
-        <label className="field">
-          <span>Admin token</span>
-          <input
-            placeholder="ADMIN_CREDIT_SECRET"
-            type="password"
-            value={adminToken}
-            onChange={(event) => setAdminToken(event.target.value)}
-          />
-        </label>
         <button
           className="signup-button"
-          disabled={!targetUserId || !adminToken || amount <= 0}
+          disabled={!targetUserId || amount <= 0}
           type="button"
-          onClick={() => onGrantCredits(targetUserId, Math.round(amount * 100), adminToken)}
+          onClick={() => onGrantCredits(targetUserId, Math.round(amount * 100))}
         >
           Grant USDC
         </button>
         <button
           className="login-button"
-          disabled={!targetUserId || !adminToken || points <= 0}
+          disabled={!targetUserId || points <= 0}
           type="button"
-          onClick={() => onGrantPoints(targetUserId, Math.round(points), adminToken)}
+          onClick={() => onGrantPoints(targetUserId, Math.round(points))}
         >
           Grant points
         </button>
@@ -1663,7 +1785,7 @@ function PointLedgerList({ pointLedger }: { pointLedger: PlatformPointEntry[] })
 function UsdcIcon() {
   return (
     <span className="usdc-icon" aria-label="USDC">
-      $
+      <img alt="" src={usdcLogo} />
     </span>
   );
 }
@@ -2089,24 +2211,25 @@ function cardName(cards: CardDefinition[], cardId: string): string {
   return cards.find((card) => card.id === cardId)?.name ?? cardId;
 }
 
-function loadState(): AppState {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) {
-      return { ...initialState, userId: localStorage.getItem(USER_ID_STORAGE_KEY) ?? "" };
-    }
-    const parsed = JSON.parse(saved) as Partial<AppState>;
-    return {
-      ...initialState,
-      ...parsed,
-      progress: { ...initialProgress, ...(parsed.progress ?? {}) },
-      ledger: parsed.ledger ?? [],
-      pointLedger: parsed.pointLedger ?? [],
-      userId: parsed.userId || localStorage.getItem(USER_ID_STORAGE_KEY) || "",
-    } as AppState;
-  } catch {
-    return initialState;
-  }
+function clearUserState(current: AppState): AppState {
+  return {
+    ...current,
+    authProvider: "wallet",
+    authSubject: "",
+    connected: false,
+    displayName: "",
+    email: "",
+    inventory: [],
+    ledger: [],
+    locks: {},
+    pointLedger: [],
+    positions: [],
+    progress: initialProgress,
+    role: "player",
+    settled: [],
+    userId: "",
+    walletAddress: "",
+  };
 }
 
 function mergePlatformState(current: AppState, platformState: PlatformUserState, extra: Partial<AppState> = {}): AppState {
@@ -2138,22 +2261,37 @@ function buildLocks(positions: PositionInput[]): Record<string, string[]> {
   }, {});
 }
 
-function demoWalletAddress(seed: string): string {
-  const clean = seed.replace(/[^a-zA-Z0-9]/g, "").padEnd(12, "0");
-  return `0x${clean.slice(0, 4)}...${clean.slice(-4)}`;
-}
-
-function authSubjectFor(provider: AuthProvider, email: string, walletAddress: string): string {
-  if (provider === "sui-zklogin") return `sui:google:${email.trim().toLowerCase()}`;
-  if (provider === "google") return `google:${email.trim().toLowerCase()}`;
-  return walletAddress.trim().toLowerCase();
-}
-
 function authProviderLabel(provider: AuthProvider): string {
-  if (provider === "sui-zklogin") return "Google zkLogin";
-  if (provider === "zksync") return "ZKsync";
+  if (provider === "solana") return "Solana wallet";
   if (provider === "google") return "Google";
   return "Wallet";
+}
+
+function loadGoogleIdentity(): Promise<void> {
+  if (window.google) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>('script[src="https://accounts.google.com/gsi/client"]');
+    if (existing) {
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener("error", () => reject(new Error("google_identity_failed")), { once: true });
+      return;
+    }
+    const script = document.createElement("script");
+    script.async = true;
+    script.defer = true;
+    script.src = "https://accounts.google.com/gsi/client";
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("google_identity_failed"));
+    document.head.appendChild(script);
+  });
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary);
 }
 
 function pickLaunchMatch(matches: MatchSnapshot[]): MatchSnapshot | undefined {
@@ -2338,11 +2476,14 @@ function chartDateTicks(history: PlatformHistoryPoint[]): Array<{ index: number;
 }
 
 function formatCents(cents: number): string {
-  const dollars = (cents / 100).toLocaleString("en-US", {
+  return (cents / 100).toLocaleString("en-US", {
     currency: "USD",
     style: "currency",
   });
-  return `${dollars} USDC`;
+}
+
+function formatUsdcCents(cents: number): string {
+  return `${formatCents(cents)} USDC`;
 }
 
 function formatSignedCents(cents: number): string {
@@ -2540,4 +2681,39 @@ function formatStart(value?: string | number): string {
     minute: "2-digit",
     month: "short",
   });
+}
+
+function formatFixtureTime(value?: string | number): string {
+  if (!value) return "TBA";
+  const date = typeof value === "number" ? new Date(value) : new Date(value);
+  if (Number.isNaN(date.getTime())) return "TBA";
+  return date.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatFixtureDate(value?: string | number): string {
+  if (!value) return "Date TBA";
+  const date = typeof value === "number" ? new Date(value) : new Date(value);
+  if (Number.isNaN(date.getTime())) return "Date TBA";
+  return date.toLocaleDateString("en-US", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function matchStatusLabel(match: MatchSnapshot): string {
+  if (match.status === "FINAL") return "Final";
+  if (match.status === "LIVE") return match.minute || "Live";
+  return "Scheduled";
+}
+
+function sameTeam(left: string, right: string): boolean {
+  return left.trim().toLowerCase() === right.trim().toLowerCase();
+}
+
+function formatGoalMinute(minute: number): string {
+  return `${minute}'`;
 }

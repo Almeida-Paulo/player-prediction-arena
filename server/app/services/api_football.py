@@ -103,6 +103,11 @@ def apply_fixture_details(match: dict[str, Any], fixture: dict[str, Any]) -> Non
     if api_fixture_id:
         match["detailProviderFixtureId"] = str(api_fixture_id)
     match["detailSource"] = "api-football"
+    venue = fixture_meta.get("venue") if isinstance(fixture_meta.get("venue"), dict) else {}
+    if venue.get("name"):
+        match["venueName"] = venue.get("name")
+    if venue.get("city"):
+        match["venueCity"] = venue.get("city")
 
     home_team = teams.get("home") or {}
     away_team = teams.get("away") or {}

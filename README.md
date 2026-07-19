@@ -30,8 +30,8 @@ Politica de dados: veja `docs/DATA_SOURCES.md`.
 - Dados obrigatorios de partidas: TXLine.
 - Dados auxiliares gratuitos: API-FOOTBALL/OpenLigaDB/StatsBomb somente quando houver mapeamento confiavel.
 - `ALLOW_DEMO_DATA=false` em producao para nao publicar jogos ficticios.
-- Usuarios entram por fluxo simulado de Google zkLogin, ZKsync ou wallet.
-- Saldo financeiro interno e exibido como USDC e so pode ser creditado pelo admin.
+- Usuarios entram por Google Identity Services ou assinatura de carteira Solana.
+- Saldo financeiro interno aparece como `$` no produto e como USDC apenas na tela Rewards.
 - Arena Points sao separados do saldo USDC e servem para ranking/recompensas.
 
 ## Regras implementadas
@@ -226,12 +226,31 @@ API_FOOTBALL_BASE=https://v3.football.api-sports.io
 API_FOOTBALL_KEY=
 API_FOOTBALL_LEAGUE_ID=1
 API_FOOTBALL_SEASON=2026
-ADMIN_CREDIT_SECRET=CRIE_UM_SEGREDO_LONGO
+ADMIN_EMAILS=server-only-admin@example.com
+GOOGLE_CLIENT_ID=SEU_GOOGLE_OAUTH_CLIENT_ID
 OPENLIGADB_BASE=https://api.openligadb.de
 ALLOW_DEMO_DATA=false
 ```
 
-`TXLINE_API_TOKEN` e o token ativado retornado por `/api/token/activate`. `TXLINE_GUEST_JWT` pode ficar vazio; o backend tenta criar uma sessao guest automaticamente em `/auth/guest/start`.
+`TXLINE_API_TOKEN` e o token ativado retornado por `/api/token/activate`. `TXLINE_GUEST_JWT` pode ficar vazio; o backend tenta criar uma sessao guest automaticamente em `/auth/guest/start`. O valor real de `ADMIN_EMAILS` deve ficar somente no `.env` privado do servidor; admin so e concedido depois que o Google verifica esse email.
+
+Para o botao de Google aparecer no frontend, crie tambem `.env` na raiz do projeto antes do build:
+
+```text
+VITE_GOOGLE_CLIENT_ID=SEU_GOOGLE_OAUTH_CLIENT_ID
+```
+
+Arquivos reais de ambiente nunca devem ir para o GitHub. Este repositorio versiona apenas `.env.example`, `server/.env.example` e `infra/env/*.example`; `.env`, `server/.env`, `.dev.vars`, `server/.venv`, `node_modules` e `dist` ficam ignorados por `.gitignore`.
+
+Antes de qualquer push publico, confira:
+
+```bash
+git status --short
+git diff --check
+git ls-files | grep -E '(^|/)(\\.env|\\.dev\\.vars)$'
+```
+
+O ultimo comando nao deve retornar nada.
 
 Em producao, se `TXLINE_API_TOKEN` estiver vazio ou invalido, `/api/matches` retorna `503` em vez de mostrar mockups. Para uma demo local controlada, use `ALLOW_DEMO_DATA=true`.
 
@@ -470,13 +489,32 @@ Liquidar uma posicao:
 POST /api/settle
 ```
 
-Criar usuario persistente:
+Ver sessao autenticada:
 
 ```text
-POST /api/users
+GET /api/me
 ```
 
-Estado persistente de usuario:
+Login com Google:
+
+```text
+POST /api/auth/google
+```
+
+Login com Solana:
+
+```text
+POST /api/auth/solana/challenge
+POST /api/auth/solana/verify
+```
+
+Logout:
+
+```text
+POST /api/auth/logout
+```
+
+Estado persistente de usuario autenticado:
 
 ```text
 GET /api/users/{user_id}/state
@@ -504,16 +542,14 @@ Creditar usuario com creditos internos da plataforma:
 
 ```text
 POST /api/admin/credits
-Header: X-Admin-Token: <ADMIN_CREDIT_SECRET>
 ```
 
-O valor e informado em centavos de USDC interno (`amountCents`). Exemplo: `25000` representa `$250.00 USDC`.
+O endpoint exige sessao autenticada de admin. O admin e definido por email em `ADMIN_EMAILS`, somente no `.env` do servidor. O valor e informado em centavos (`amountCents`). Exemplo: `25000` representa `$250.00`; em Rewards esse saldo e apresentado como USDC interno.
 
 Creditar Arena Points por evento:
 
 ```text
 POST /api/admin/points
-Header: X-Admin-Token: <ADMIN_CREDIT_SECRET>
 ```
 
 ## 14. Onde alterar regras

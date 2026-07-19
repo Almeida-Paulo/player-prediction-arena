@@ -78,9 +78,9 @@ Production rule: do not display fake lineup players or fake logos while this map
 
 ## Platform USDC credits
 
-The platform has internal USDC-denominated test credits in PostgreSQL. These are not real USDC transfers yet and there is no checkout flow.
+The platform has internal dollar-denominated test credits in PostgreSQL. The Rewards balance presents this as an internal USDC-style balance for the hackathon demo. These are not real USDC transfers yet and there is no checkout flow.
 
-New users start with `0` USDC. An admin distributes internal USDC credits through:
+New users start with `0`. An admin distributes internal credits through:
 
 ```text
 POST /api/admin/credits
@@ -89,18 +89,14 @@ POST /api/admin/credits
 The endpoint requires:
 
 ```env
-ADMIN_CREDIT_SECRET=choose-a-long-random-secret
+ADMIN_EMAILS=server-only-admin@example.com
 ```
 
-The frontend sends this value as:
+Only the backend reads `ADMIN_EMAILS`. Do not expose admin emails or server env files through the frontend bundle. Admin role is granted only after Google verifies the email address; Solana wallet login alone is treated as a player account because it does not verify email ownership.
 
-```text
-X-Admin-Token: <ADMIN_CREDIT_SECRET>
-```
+Every credit, stake, payout, and adjustment is recorded in `ledger_entries` with `currency='USDC'` because the internal balance is presented as USDC in Rewards.
 
-Every USDC credit, stake, payout, and adjustment is recorded in `ledger_entries` with `currency='USDC'`.
-
-Arena Points are separate from USDC. They are stored on `users.arena_points` and recorded in `point_entries`. The current scoring model is:
+Arena Points are separate from the dollar/USDC-style balance. They are stored on `users.arena_points` and recorded in `point_entries`. The current scoring model is:
 
 - `+10 AP` for placing a prediction.
 - `+25 AP` for each TXLine-backed settlement.
@@ -112,22 +108,35 @@ Admins can also grant event points through:
 
 ```text
 POST /api/admin/points
-X-Admin-Token: <ADMIN_CREDIT_SECRET>
 ```
 
-## Account simulation
+Admin endpoints require the request cookie to belong to an authenticated admin user whose Google-verified email is listed in `ADMIN_EMAILS`.
 
-The current app simulates account creation with:
+## Account login
 
-- Google zkLogin, modeled after Sui zkLogin.
-- ZKsync wallet/smart-account path.
-- Standard wallet address.
+The current app creates real platform users through:
 
-The database stores `email`, `auth_provider`, `auth_subject`, and `wallet_address`. Real OAuth, zkLogin proof verification, and wallet signature verification are not enabled yet; the schema is prepared so those checks can replace the current demo flow.
+- Google Identity Services: the frontend receives a Google ID token and the backend verifies it against `GOOGLE_CLIENT_ID`.
+- Solana wallet signing: the backend creates a nonce challenge, the browser wallet signs the message, and the backend verifies the Ed25519 signature.
+
+Required env for Google:
+
+```env
+GOOGLE_CLIENT_ID=your-google-oauth-web-client-id
+VITE_GOOGLE_CLIENT_ID=your-google-oauth-web-client-id
+```
+
+Required Python dependency for Solana signature verification:
+
+```bash
+pip install -r server/requirements.txt
+```
+
+The database stores `email`, `auth_provider`, `auth_subject`, `wallet_address`, sessions, and auth identities. Public `POST /api/users` is disabled; account creation must go through `/api/auth/google` or `/api/auth/solana/verify`. Unverified Solana emails are not used to attach an existing account or assign admin access.
 
 ## Real vs platform-generated data
 
 - Real match fixtures, scores, status, and odds: TXLine/TXODDS.
 - Real lineups, logos, statistics, and ratings: API-FOOTBALL when configured.
-- Platform data: users, auth method, email, USDC balances, Arena Points, positions, card inventory, ledger, volume, leaderboard, and prediction history.
+- Platform data: users, auth method, email, internal balances shown as USDC in Rewards, Arena Points, positions, card inventory, ledger, volume, leaderboard, and prediction history.
 - Synthetic seed data: only the initial liquidity/activity used to make the hackathon market graph readable before enough real users trade.
