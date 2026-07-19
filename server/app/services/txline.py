@@ -7,6 +7,7 @@ import httpx
 
 from ..config import Settings
 from ..db import get_pool
+from .api_football import hydrate_api_football_details
 
 logger = logging.getLogger(__name__)
 _txline_odds_tables_ready = False
@@ -56,6 +57,10 @@ async def fetch_txline_matches(settings: Settings) -> list[dict[str, Any]] | Non
             matches = world_cup_matches or [mapped for _, mapped in mapped_pairs]
             if matches:
                 await hydrate_odds_snapshots(client, base, settings, guest_jwt, matches)
+                try:
+                    await hydrate_api_football_details(client, settings, matches)
+                except Exception as exc:
+                    logger.warning("Unable to hydrate API-FOOTBALL details: %s", exc)
             return matches or None
     except (httpx.HTTPError, RuntimeError):
         return None

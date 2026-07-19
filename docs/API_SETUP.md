@@ -48,16 +48,61 @@ References:
 
 ## Lineups, logos, and richer stats
 
-TXLine covers the required World Cup fixture, scores, odds, and score feed path. Starting XI, team artwork, and richer player ratings may require a second provider.
+TXLine covers the required World Cup fixture, scores, odds, and score feed path. Starting XI, team artwork, richer team statistics, and player ratings require a second provider because TXLine does not expose lineups in the current integration.
 
-Current free candidate:
+Current optional provider:
 
-- TheSportsDB v1 free key is `123`.
-- Useful endpoints include `lookuplineup.php?id=...` and `lookupeventstats.php?id=...`.
-- The hard part is mapping a TXLine `fixtureId` to a TheSportsDB `idEvent` without a paid or maintained mapping table.
+- API-FOOTBALL / API-SPORTS.
+- Free plan: 100 requests per day.
+- Useful endpoint: `GET /fixtures`.
+- Useful endpoint: `GET /fixtures/lineups?fixture=...`.
+- The backend maps TXLine fixtures to API-FOOTBALL fixtures by date, home team, and away team.
 
-Reference:
+Add these values to `server/.env` when you have the key:
 
-- https://www.thesportsdb.com/documentation
+```env
+API_FOOTBALL_BASE=https://v3.football.api-sports.io
+API_FOOTBALL_KEY=your_api_football_key
+API_FOOTBALL_LEAGUE_ID=1
+API_FOOTBALL_SEASON=2026
+```
+
+The provider is optional. If `API_FOOTBALL_KEY` is empty, the app still loads TXLine fixtures and odds, but the lineup panel remains in a pending state.
+
+References:
+
+- https://www.api-football.com/documentation-beta
+- https://api-sports.io/sports/football
 
 Production rule: do not display fake lineup players or fake logos while this mapping is missing.
+
+## Platform credits
+
+The platform has internal test credits in PostgreSQL. These are not blockchain tokens.
+
+New users start with `0` credits. An admin distributes credits through:
+
+```text
+POST /api/admin/credits
+```
+
+The endpoint requires:
+
+```env
+ADMIN_CREDIT_SECRET=choose-a-long-random-secret
+```
+
+The frontend sends this value as:
+
+```text
+X-Admin-Token: <ADMIN_CREDIT_SECRET>
+```
+
+Every credit, stake, payout, and starter pack action is recorded in `ledger_entries`.
+
+## Real vs platform-generated data
+
+- Real match fixtures, scores, status, and odds: TXLine/TXODDS.
+- Real lineups, logos, statistics, and ratings: API-FOOTBALL when configured.
+- Platform data: users, balances, positions, card inventory, ledger, volume, leaderboard, and prediction history.
+- Synthetic seed data: only the initial liquidity/activity used to make the hackathon market graph readable before enough real users trade.

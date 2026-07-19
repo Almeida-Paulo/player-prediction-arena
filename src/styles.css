@@ -1456,6 +1456,40 @@ p {
   white-space: nowrap;
 }
 
+.match-data-strip {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 82px 1fr minmax(0, 1.4fr);
+  margin-top: 12px;
+  padding: 10px;
+}
+
+.match-data-strip div {
+  min-width: 0;
+}
+
+.match-data-strip span {
+  color: var(--muted);
+  display: block;
+  font-size: 10px;
+  font-weight: 780;
+  line-height: 1;
+  margin-bottom: 5px;
+  text-transform: uppercase;
+}
+
+.match-data-strip strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 820;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .lineup-subhead {
   color: var(--muted);
   font-size: 12px;
@@ -1797,6 +1831,58 @@ p {
   font-style: normal;
   font-weight: 850;
   margin-left: auto;
+}
+
+.credit-desk {
+  display: grid;
+  gap: 14px;
+}
+
+.credit-grid {
+  align-items: end;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 150px minmax(0, 1fr) auto;
+}
+
+.credit-grid .signup-button {
+  min-height: 42px;
+}
+
+.ledger-list {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+.ledger-row {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 150px 110px minmax(0, 1fr);
+  padding: 10px;
+}
+
+.ledger-row span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 780;
+  text-transform: uppercase;
+}
+
+.ledger-row strong {
+  font-size: 14px;
+}
+
+.ledger-row small {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .is-positive {
@@ -2323,13 +2409,16 @@ p {
   .trade-inputs,
   .trade-actions,
   .lineup-stats,
+  .match-data-strip,
   .stableprice-strip,
   .prediction-grid,
   .insight-column,
   .profile-grid,
   .help-grid,
   .selected-loadout,
-  .card-choice-grid {
+  .card-choice-grid,
+  .credit-grid,
+  .ledger-row {
     grid-template-columns: 1fr;
   }
 

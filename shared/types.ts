@@ -38,17 +38,42 @@ export interface SkillBadgeDefinition {
 export type MarketSettlementKey =
   | "home_win"
   | "away_win"
+  | "draw_after_90"
   | "home_scores"
+  | "away_scores"
+  | "both_teams_score"
+  | "over_2_5_goals"
+  | "over_3_5_goals"
+  | "under_2_5_goals"
+  | "home_2plus_goals"
+  | "away_2plus_goals"
+  | "home_first_goal"
+  | "away_first_goal"
   | "home_clean_sheet"
+  | "away_clean_sheet"
   | "any_hat_trick"
-  | "mom_home_team";
+  | "any_poker_trick"
+  | "penalty_shootout"
+  | "extra_time"
+  | "home_possession_60"
+  | "away_possession_60"
+  | "home_most_corners"
+  | "away_most_corners"
+  | "mom_home_team"
+  | "mom_away_team"
+  | "manual";
 
 export interface MarketDefinition {
   id: string;
   label: string;
-  kind: "result" | "goal" | "defense" | "player" | "rating";
+  kind: "result" | "goal" | "defense" | "player" | "rating" | "stats" | "future";
   oddsBps: number;
   settlementKey: MarketSettlementKey;
+  question?: string;
+  scope?: "all" | "final" | "third-place" | "world-cup";
+  contextTeam?: "home" | "away" | "none";
+  dataSource?: "txline" | "api-football" | "platform" | "manual";
+  marketNote?: string;
 }
 
 export interface TeamStats {
@@ -70,6 +95,8 @@ export interface LineupPlayer {
   name: string;
   number?: number;
   position?: string;
+  photoUrl?: string;
+  rating?: number;
   x?: number;
   y?: number;
 }
@@ -113,6 +140,8 @@ export interface MatchSnapshot {
   ratings: Record<string, number>;
   mom: string;
   source: "txline" | "openligadb" | "statsbomb" | "demo";
+  detailSource?: "api-football" | "openligadb" | "statsbomb";
+  detailProviderFixtureId?: string;
   oracleProof?: string;
   events: MatchEvent[];
   odds?: TxLineOddsEntry[];
@@ -129,6 +158,7 @@ export interface PositionInput {
   matchId: string;
   marketId: string;
   marketLabel: string;
+  outcome?: "yes" | "no";
   stakeCents: number;
   oddsBps: number;
   context: PositionContext;
@@ -155,4 +185,28 @@ export interface UserProgress {
   riskManagedWins: number;
   oracleSettlements: number;
   matchBetCounts: Record<string, number>;
+}
+
+export interface PlatformLedgerEntry {
+  id: string;
+  userId: string;
+  type: "admin_credit" | "stake" | "payout" | "pack" | "adjustment";
+  amountCents: number;
+  balanceAfterCents: number;
+  note?: string;
+  createdAt: string;
+}
+
+export interface PlatformUserState {
+  user: {
+    id: string;
+    displayName: string;
+    walletAddress: string;
+    role: "admin" | "player";
+  };
+  progress: UserProgress;
+  inventory: string[];
+  positions: PositionInput[];
+  settled: SettledPosition[];
+  ledger: PlatformLedgerEntry[];
 }

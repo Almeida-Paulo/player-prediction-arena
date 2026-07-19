@@ -44,12 +44,33 @@ BADGES: list[dict[str, str]] = [
 ]
 
 MARKETS: list[dict[str, Any]] = [
-    {"id": "home-win", "label": "Home team wins", "kind": "result", "oddsBps": 17400, "settlementKey": "home_win"},
-    {"id": "away-win", "label": "Away team wins", "kind": "result", "oddsBps": 21800, "settlementKey": "away_win"},
-    {"id": "home-goal", "label": "Home team scores", "kind": "goal", "oddsBps": 12800, "settlementKey": "home_scores"},
-    {"id": "home-clean-sheet", "label": "Home team clean sheet", "kind": "defense", "oddsBps": 26500, "settlementKey": "home_clean_sheet"},
-    {"id": "hat-trick-market", "label": "Any hat-trick", "kind": "player", "oddsBps": 56000, "settlementKey": "any_hat_trick"},
-    {"id": "mom-home-team", "label": "MOM from home team", "kind": "rating", "oddsBps": 34000, "settlementKey": "mom_home_team"},
+    {"id": "home-win", "label": "Home team wins", "kind": "result", "oddsBps": 17400, "settlementKey": "home_win", "scope": "all", "contextTeam": "home", "dataSource": "txline"},
+    {"id": "away-win", "label": "Away team wins", "kind": "result", "oddsBps": 21800, "settlementKey": "away_win", "scope": "all", "contextTeam": "away", "dataSource": "txline"},
+    {"id": "draw-after-90", "label": "Draw after regulation", "kind": "result", "oddsBps": 34000, "settlementKey": "draw_after_90", "scope": "all", "contextTeam": "none", "dataSource": "txline", "question": "Will the match be tied after regulation?"},
+    {"id": "home-goal", "label": "Home team scores", "kind": "goal", "oddsBps": 12800, "settlementKey": "home_scores", "scope": "all", "contextTeam": "home", "dataSource": "txline"},
+    {"id": "away-goal", "label": "Away team scores", "kind": "goal", "oddsBps": 13200, "settlementKey": "away_scores", "scope": "all", "contextTeam": "away", "dataSource": "txline"},
+    {"id": "both-teams-score", "label": "Both teams score", "kind": "goal", "oddsBps": 18800, "settlementKey": "both_teams_score", "scope": "all", "contextTeam": "none", "dataSource": "txline", "question": "Will both teams score?"},
+    {"id": "over-2-5-goals", "label": "Over 2.5 goals", "kind": "goal", "oddsBps": 20500, "settlementKey": "over_2_5_goals", "scope": "all", "contextTeam": "none", "dataSource": "txline", "question": "Will the match have 3 or more goals?"},
+    {"id": "over-3-5-goals", "label": "Over 3.5 goals", "kind": "goal", "oddsBps": 33500, "settlementKey": "over_3_5_goals", "scope": "all", "contextTeam": "none", "dataSource": "txline", "question": "Will the match have 4 or more goals?"},
+    {"id": "under-2-5-goals", "label": "Under 2.5 goals", "kind": "goal", "oddsBps": 18500, "settlementKey": "under_2_5_goals", "scope": "all", "contextTeam": "none", "dataSource": "txline", "question": "Will the match finish with under 3 goals?"},
+    {"id": "home-2plus-goals", "label": "Home team scores 2+", "kind": "goal", "oddsBps": 24500, "settlementKey": "home_2plus_goals", "scope": "all", "contextTeam": "home", "dataSource": "txline"},
+    {"id": "away-2plus-goals", "label": "Away team scores 2+", "kind": "goal", "oddsBps": 28000, "settlementKey": "away_2plus_goals", "scope": "all", "contextTeam": "away", "dataSource": "txline"},
+    {"id": "home-first-goal", "label": "Home team scores first", "kind": "goal", "oddsBps": 21000, "settlementKey": "home_first_goal", "scope": "all", "contextTeam": "home", "dataSource": "txline"},
+    {"id": "home-clean-sheet", "label": "Home team clean sheet", "kind": "defense", "oddsBps": 26500, "settlementKey": "home_clean_sheet", "scope": "all", "contextTeam": "home", "dataSource": "txline"},
+    {"id": "away-clean-sheet", "label": "Away team clean sheet", "kind": "defense", "oddsBps": 31000, "settlementKey": "away_clean_sheet", "scope": "all", "contextTeam": "away", "dataSource": "txline"},
+    {"id": "hat-trick-market", "label": "Any hat-trick", "kind": "player", "oddsBps": 56000, "settlementKey": "any_hat_trick", "scope": "all", "contextTeam": "none", "dataSource": "txline", "question": "Will any player score a hat-trick?"},
+    {"id": "poker-trick-market", "label": "Any poker-trick", "kind": "player", "oddsBps": 125000, "settlementKey": "any_poker_trick", "scope": "all", "contextTeam": "none", "dataSource": "txline", "question": "Will any player score 4 goals?"},
+    {"id": "penalty-shootout", "label": "Penalty shootout", "kind": "result", "oddsBps": 43000, "settlementKey": "penalty_shootout", "scope": "all", "contextTeam": "none", "dataSource": "api-football", "question": "Will the match go to penalties?", "marketNote": "Needs a secondary match-detail provider unless TXLine exposes shootout state."},
+    {"id": "extra-time", "label": "Extra time", "kind": "result", "oddsBps": 36000, "settlementKey": "extra_time", "scope": "all", "contextTeam": "none", "dataSource": "api-football", "question": "Will the match go to extra time?", "marketNote": "Needs a secondary match-detail provider unless TXLine exposes extra-time state."},
+    {"id": "home-possession-60", "label": "Home team 60% possession", "kind": "stats", "oddsBps": 42000, "settlementKey": "home_possession_60", "scope": "all", "contextTeam": "home", "dataSource": "api-football"},
+    {"id": "away-possession-60", "label": "Away team 60% possession", "kind": "stats", "oddsBps": 48000, "settlementKey": "away_possession_60", "scope": "all", "contextTeam": "away", "dataSource": "api-football"},
+    {"id": "home-most-corners", "label": "Home team more corners", "kind": "stats", "oddsBps": 21500, "settlementKey": "home_most_corners", "scope": "all", "contextTeam": "home", "dataSource": "api-football"},
+    {"id": "away-most-corners", "label": "Away team more corners", "kind": "stats", "oddsBps": 23500, "settlementKey": "away_most_corners", "scope": "all", "contextTeam": "away", "dataSource": "api-football"},
+    {"id": "mom-home-team", "label": "MOM from home team", "kind": "rating", "oddsBps": 34000, "settlementKey": "mom_home_team", "scope": "all", "contextTeam": "home", "dataSource": "api-football"},
+    {"id": "mom-away-team", "label": "MOM from away team", "kind": "rating", "oddsBps": 36000, "settlementKey": "mom_away_team", "scope": "all", "contextTeam": "away", "dataSource": "api-football"},
+    {"id": "world-cup-top-scorer", "label": "Golden Boot winner", "kind": "future", "oddsBps": 76000, "settlementKey": "manual", "scope": "world-cup", "contextTeam": "none", "dataSource": "manual", "question": "Will the World Cup top scorer come from Spain or Argentina?", "marketNote": "Future market for demo liquidity; admin settlement is required until a top-scorer feed is connected."},
+    {"id": "world-cup-golden-ball", "label": "Golden Ball winner", "kind": "future", "oddsBps": 88000, "settlementKey": "manual", "scope": "world-cup", "contextTeam": "none", "dataSource": "manual", "question": "Will the Golden Ball winner play in the final?", "marketNote": "Future market for demo liquidity; admin settlement is required until awards data is connected."},
+    {"id": "world-cup-most-team-goals", "label": "Most team goals", "kind": "future", "oddsBps": 52000, "settlementKey": "manual", "scope": "world-cup", "contextTeam": "none", "dataSource": "manual", "question": "Will Spain finish as the tournament top-scoring team?", "marketNote": "Future market for demo liquidity; admin settlement is required until standings/team totals are connected."},
 ]
 
 
@@ -154,11 +175,15 @@ def settle_position(match: dict[str, Any], position: dict[str, Any]) -> dict[str
     market = next((item for item in MARKETS if item["id"] == position["marketId"]), None)
     if not market:
         raise ValueError(f"unknown market: {position['marketId']}")
+    if not can_settle_market(market, match):
+        raise ValueError(f"market_not_settleable:{market['id']}")
 
-    won = resolve_market(market, match)
+    resolved_yes = resolve_market(market, match)
+    won = not resolved_yes if position.get("outcome") == "no" else resolved_yes
     if not won:
         return {
             **position,
+            "outcome": position.get("outcome", "yes"),
             "settled": True,
             "won": False,
             "grossPayoutCents": 0,
@@ -182,6 +207,7 @@ def settle_position(match: dict[str, Any], position: dict[str, Any]) -> dict[str
 
     return {
         **position,
+        "outcome": position.get("outcome", "yes"),
         "settled": True,
         "won": True,
         "grossPayoutCents": gross,
@@ -193,20 +219,70 @@ def settle_position(match: dict[str, Any], position: dict[str, Any]) -> dict[str
     }
 
 
+def can_settle_market(market: dict[str, Any], match: dict[str, Any]) -> bool:
+    if market.get("settlementKey") == "manual":
+        return False
+    if match.get("status") != "FINAL":
+        return False
+    if market.get("dataSource") == "api-football" and not match.get("detailSource"):
+        return False
+    if market.get("settlementKey") in {"home_first_goal", "away_first_goal", "any_hat_trick", "any_poker_trick"}:
+        return bool(match.get("events"))
+    return True
+
+
 def resolve_market(market: dict[str, Any], match: dict[str, Any]) -> bool:
     key = market["settlementKey"]
     if key == "home_win":
         return team_goals(match, match["home"]) > team_goals(match, match["away"])
     if key == "away_win":
         return team_goals(match, match["away"]) > team_goals(match, match["home"])
+    if key == "draw_after_90":
+        return team_goals(match, match["home"]) == team_goals(match, match["away"])
     if key == "home_scores":
         return team_goals(match, match["home"]) > 0
+    if key == "away_scores":
+        return team_goals(match, match["away"]) > 0
+    if key == "both_teams_score":
+        return team_goals(match, match["home"]) > 0 and team_goals(match, match["away"]) > 0
+    if key == "over_2_5_goals":
+        return total_goals(match) >= 3
+    if key == "over_3_5_goals":
+        return total_goals(match) >= 4
+    if key == "under_2_5_goals":
+        return total_goals(match) <= 2
+    if key == "home_2plus_goals":
+        return team_goals(match, match["home"]) >= 2
+    if key == "away_2plus_goals":
+        return team_goals(match, match["away"]) >= 2
+    if key == "home_first_goal":
+        return first_goal_team(match) == match["home"]
+    if key == "away_first_goal":
+        return first_goal_team(match) == match["away"]
     if key == "home_clean_sheet":
         return goals_against(match, match["home"]) == 0
+    if key == "away_clean_sheet":
+        return goals_against(match, match["away"]) == 0
     if key == "any_hat_trick":
         return max_goals_by_player(match) >= 3
+    if key == "any_poker_trick":
+        return max_goals_by_player(match) >= 4
+    if key == "penalty_shootout":
+        return any("penalty-shootout" in event.get("tags", []) for event in match.get("events", []))
+    if key == "extra_time":
+        return any(event.get("minute", 0) > 90 or "extra-time" in event.get("tags", []) for event in match.get("events", []))
+    if key == "home_possession_60":
+        return team_stats(match, match["home"])["possession"] > 60
+    if key == "away_possession_60":
+        return team_stats(match, match["away"])["possession"] > 60
+    if key == "home_most_corners":
+        return team_stats(match, match["home"])["cornersAgainst"] < team_stats(match, match["away"])["cornersAgainst"]
+    if key == "away_most_corners":
+        return team_stats(match, match["away"])["cornersAgainst"] < team_stats(match, match["home"])["cornersAgainst"]
     if key == "mom_home_team":
         return scorer_team(match, match["mom"]) == match["home"]
+    if key == "mom_away_team":
+        return scorer_team(match, match["mom"]) == match["away"]
     return False
 
 
@@ -250,6 +326,10 @@ def team_goals(match: dict[str, Any], team: str) -> int:
     return int(match["score"].get(team, 0))
 
 
+def total_goals(match: dict[str, Any]) -> int:
+    return team_goals(match, match["home"]) + team_goals(match, match["away"])
+
+
 def goals_against(match: dict[str, Any], team: str) -> int:
     opponent = match["away"] if team == match["home"] else match["home"]
     return team_goals(match, opponent)
@@ -273,6 +353,11 @@ def max_goals_by_player(match: dict[str, Any], team: str | None = None) -> int:
 
 def unique_scorers(match: dict[str, Any], team: str) -> int:
     return len({event["player"] for event in match.get("events", []) if event["type"] == "goal" and event["team"] == team})
+
+
+def first_goal_team(match: dict[str, Any]) -> str | None:
+    goals = sorted((event for event in match.get("events", []) if event.get("type") == "goal"), key=lambda event: event.get("minute", 0))
+    return goals[0].get("team") if goals else None
 
 
 def has_tagged_goal(match: dict[str, Any], team: str, tag: str) -> bool:

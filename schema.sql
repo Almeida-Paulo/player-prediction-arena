@@ -2,7 +2,10 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
-  balance_cents INTEGER NOT NULL DEFAULT 125000,
+  display_name TEXT NOT NULL DEFAULT 'Prediction Arena Player',
+  wallet_address TEXT NOT NULL DEFAULT '',
+  role TEXT NOT NULL DEFAULT 'player',
+  balance_cents INTEGER NOT NULL DEFAULT 0,
   total_bets INTEGER NOT NULL DEFAULT 0,
   packs_opened INTEGER NOT NULL DEFAULT 0,
   current_streak INTEGER NOT NULL DEFAULT 0,
@@ -30,21 +33,40 @@ CREATE TABLE IF NOT EXISTS positions (
   match_id TEXT NOT NULL,
   market_id TEXT NOT NULL,
   market_label TEXT NOT NULL,
+  outcome TEXT NOT NULL DEFAULT 'yes',
   stake_cents INTEGER NOT NULL CHECK (stake_cents > 0),
   odds_bps INTEGER NOT NULL CHECK (odds_bps > 0),
   context_json JSONB NOT NULL,
   card_ids_json JSONB NOT NULL DEFAULT '[]'::jsonb,
   settled BOOLEAN NOT NULL DEFAULT false,
   won BOOLEAN,
+  gross_payout_cents INTEGER,
+  net_profit_cents INTEGER,
   payout_cents INTEGER,
   bonus_cents INTEGER,
+  activated_card_ids_json JSONB NOT NULL DEFAULT '[]'::jsonb,
   oracle_proof TEXT,
+  settlement_json JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   settled_at TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS idx_positions_user_match ON positions(user_id, match_id);
 CREATE INDEX IF NOT EXISTS idx_positions_settled ON positions(settled);
+
+CREATE TABLE IF NOT EXISTS ledger_entries (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  amount_cents INTEGER NOT NULL,
+  balance_after_cents INTEGER NOT NULL,
+  position_id UUID,
+  note TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ledger_entries_user_time
+  ON ledger_entries(user_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS earned_badges (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     txline_guest_jwt: str = ""
     txline_competition_id: str = ""
     txline_network: str = "devnet"
+    api_football_base: str = "https://v3.football.api-sports.io"
+    api_football_key: str = ""
+    api_football_league_id: str = "1"
+    api_football_season: str = "2026"
+    admin_credit_secret: str = ""
     openligadb_base: str = "https://api.openligadb.de"
     allow_demo_data: bool = False
 

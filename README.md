@@ -17,6 +17,8 @@ Usuario
           -> APIs auxiliares gratuitas quando houver mapeamento confiavel
 ```
 
+Politica de dados: veja `docs/DATA_SOURCES.md`.
+
 ## Stack
 
 - Frontend: React + Vite + TypeScript.
@@ -26,7 +28,7 @@ Usuario
 - Processo: systemd.
 - Dominio: Cloudflare DNS/proxy.
 - Dados obrigatorios de partidas: TXLine.
-- Dados auxiliares gratuitos: TheSportsDB/OpenLigaDB/StatsBomb somente quando houver mapeamento confiavel.
+- Dados auxiliares gratuitos: API-FOOTBALL/OpenLigaDB/StatsBomb somente quando houver mapeamento confiavel.
 - `ALLOW_DEMO_DATA=false` em producao para nao publicar jogos ficticios.
 
 ## Regras implementadas
@@ -217,6 +219,11 @@ TXLINE_API_TOKEN=COLE_SEU_TOKEN_TXLINE
 TXLINE_GUEST_JWT=
 TXLINE_COMPETITION_ID=
 TXLINE_NETWORK=devnet
+API_FOOTBALL_BASE=https://v3.football.api-sports.io
+API_FOOTBALL_KEY=
+API_FOOTBALL_LEAGUE_ID=1
+API_FOOTBALL_SEASON=2026
+ADMIN_CREDIT_SECRET=CRIE_UM_SEGREDO_LONGO
 OPENLIGADB_BASE=https://api.openligadb.de
 ALLOW_DEMO_DATA=false
 ```
@@ -460,6 +467,12 @@ Liquidar uma posicao:
 POST /api/settle
 ```
 
+Criar usuario persistente:
+
+```text
+POST /api/users
+```
+
 Estado persistente de usuario:
 
 ```text
@@ -476,6 +489,19 @@ Abrir Starter Pack persistente:
 
 ```text
 POST /api/users/{user_id}/open-pack
+```
+
+Liquidar todas as posicoes abertas de um usuario em uma partida:
+
+```text
+POST /api/users/{user_id}/settle-match/{match_id}
+```
+
+Creditar usuario com creditos internos da plataforma:
+
+```text
+POST /api/admin/credits
+Header: X-Admin-Token: <ADMIN_CREDIT_SECRET>
 ```
 
 ## 14. Onde alterar regras

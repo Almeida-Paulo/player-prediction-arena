@@ -38,6 +38,8 @@ import type {
   CardType,
   MarketDefinition,
   MatchSnapshot,
+  PlatformLedgerEntry,
+  PlatformUserState,
   PositionInput,
   SettledPosition,
   TeamLineup,
@@ -49,14 +51,29 @@ import {
   type PlatformHistoryPoint,
   type PlatformUser,
 } from "./platform-activity";
-import { getCatalog, getMatches, settlePositionApi } from "./services/api";
+import {
+  createPlatformPosition,
+  createPlatformUser,
+  getCatalog,
+  getMatches,
+  getPlatformUserState,
+  grantPlatformCredits,
+  openPlatformPack,
+  settlePlatformMatch,
+  settlePositionApi,
+} from "./services/api";
 
 interface AppState {
   connected: boolean;
+  userId: string;
+  displayName: string;
+  walletAddress: string;
+  role: "admin" | "player";
   progress: UserProgress;
   inventory: string[];
   positions: PositionInput[];
   settled: SettledPosition[];
+  ledger: PlatformLedgerEntry[];
   locks: Record<string, string[]>;
   selectedMatchId: string;
   selectedMarketId: string;
@@ -79,9 +96,10 @@ interface MarketActivity {
 }
 
 const STORAGE_KEY = "player-prediction-arena-ts";
+const USER_ID_STORAGE_KEY = "prediction-arena-user-id";
 
 const initialProgress: UserProgress = {
-  balanceCents: 125000,
+  balanceCents: 0,
   totalBets: 0,
   packsOpened: 0,
   currentStreak: 0,
@@ -93,10 +111,15 @@ const initialProgress: UserProgress = {
 
 const initialState: AppState = {
   connected: false,
+  userId: "",
+  displayName: "",
+  walletAddress: "",
+  role: "player",
   progress: initialProgress,
   inventory: [],
   positions: [],
   settled: [],
+  ledger: [],
   locks: {},
   selectedMatchId: "",
   selectedMarketId: "home-win",
@@ -174,7 +197,7 @@ export function App() {
   );
 
   const marketItems = useMemo<MarketItem[]>(
-    () => matches.flatMap((match) => markets.map((market) => ({ match, market }))),
+    () => matches.flatMap((match) => markets.filter((market) => marketAppliesToMatch(market, match)).map((market) => ({ match, market }))),
     [matches, markets],
   );
 
@@ -203,10 +226,55 @@ export function App() {
   const trendingItems = useMemo(() => rankTrendingMarkets(marketItems, state).slice(0, 3), [marketItems, state]);
   const highestVolumeItems = useMemo(() => rankVolumeMarkets(marketItems, state).slice(0, 3), [marketItems, state]);
 
-  function connectWallet() {
-    setState((current) => ({ ...current, connected: true }));
-    setActiveView("home");
-    showToast("Session connected. Account features are available.");
+  async function connectWallet() {
+    const existingUserId = state.userId || localStorage.getItem(USER_ID_STORAGE_KEY) || "";
+    const nextUserId = existingUserId || `user-${crypto.randomUUID().slice(0, 8)}`;
+    try {
+      const platformState = existingUserId
+        ? await getPlatformUserState(existingUserId)
+        : await createPlatformUser({
+            displayName: "Prediction Arena Player",
+            id: nextUserId,
+            walletAddress: demoWalletAddress(nextUserId),
+          });
+      localStorage.setItem(USER_ID_STORAGE_KEY, platformState.user.id);
+      setState((current) => mergePlatformState(current, platformState, { connected: true }));
+      setActiveView("home");
+      showToast("Session connected. Account state loaded from PostgreSQL.");
+    } catch {
+      setState((current) => ({
+        ...current,
+        connected: true,
+        userId: nextUserId,
+        walletAddress: current.walletAddress || demoWalletAddress(nextUserId),
+      }));
+      setActiveView("home");
+      showToast("Session connected locally. Backend user state is unavailable.");
+    }
+  }
+
+  async function signUp() {
+    const nextUserId = `user-${crypto.randomUUID().slice(0, 8)}`;
+    try {
+      const platformState = await createPlatformUser({
+        displayName: "Prediction Arena Player",
+        id: nextUserId,
+        walletAddress: demoWalletAddress(nextUserId),
+      });
+      localStorage.setItem(USER_ID_STORAGE_KEY, platformState.user.id);
+      setState((current) => mergePlatformState(current, platformState, { connected: true }));
+      setActiveView("home");
+      showToast("Account created. Ask the admin to grant Arena Credits before placing predictions.");
+    } catch {
+      setState((current) => ({
+        ...current,
+        connected: true,
+        userId: nextUserId,
+        walletAddress: demoWalletAddress(nextUserId),
+      }));
+      setActiveView("home");
+      showToast("Account created locally. Backend user state is unavailable.");
+    }
   }
 
   function disconnectWallet() {
@@ -242,7 +310,7 @@ export function App() {
     selectMatch(matches[nextIndex].id);
   }
 
-  function placePrediction(targetMarketId = selectedMarket?.id) {
+  async function placePrediction(targetMarketId = selectedMarket?.id, outcome: "yes" | "no" = "yes") {
     if (!state.connected) return showToast("Login before placing predictions.");
     const targetMarket = markets.find((market) => market.id === targetMarketId) ?? selectedMarket;
     if (!selectedMatch || !targetMarket) return showToast("Select an available World Cup market.");
@@ -267,16 +335,34 @@ export function App() {
       team: marketTeam(selectedMatch, targetMarket),
       player: targetMarket.id === "mom-home-team" ? selectedMatch.mom : topRatedPlayer(selectedMatch),
     };
+    const [yesPercent, noPercent] = currentOutcomePercents(getMarketActivity(state, selectedMatch, targetMarket), targetMarket.oddsBps);
+    const displayedOddsBps = probabilityToOddsBps(outcome === "no" ? noPercent : yesPercent);
     const position: PositionInput = {
       id: crypto.randomUUID(),
       matchId: selectedMatch.id,
       marketId: targetMarket.id,
-      marketLabel: targetMarket.label,
+      marketLabel: positionMarketLabel(targetMarket, selectedMatch, outcome),
+      outcome,
       stakeCents: stake,
-      oddsBps: targetMarket.oddsBps,
+      oddsBps: displayedOddsBps,
       context,
       cardIds: selectedCards.map((card) => card.id),
     };
+
+    if (state.userId) {
+      try {
+        const platformState = await createPlatformPosition(state.userId, position);
+        setState((current) =>
+          mergePlatformState(current, platformState, {
+            selectedMarketId: targetMarket.id,
+          }),
+        );
+        showToast("Prediction placed. Balance, cards and history were saved.");
+        return;
+      } catch (error) {
+        return showToast(error instanceof Error ? error.message : "Unable to place prediction.");
+      }
+    }
 
     setState((current) => ({
       ...current,
@@ -299,16 +385,37 @@ export function App() {
         ],
       },
     }));
-    showToast("Prediction placed. Cards are locked until this match settles.");
+    showToast("Prediction placed locally. Backend user state is unavailable.");
   }
 
   async function settleMatch() {
     if (!selectedMatch) return;
     if (!openPositions.length) return showToast("No open predictions on this match.");
 
-    const settledPositions = await Promise.all(
-      openPositions.map((position) => settlePositionApi(position, selectedMatch)),
-    );
+    if (state.userId) {
+      try {
+        const platformState = await settlePlatformMatch(state.userId, selectedMatch.id);
+        const summary = (platformState as PlatformUserState & {
+          settledSummary?: { count: number; won: number; bonusCents: number };
+        }).settledSummary;
+        setState((current) => mergePlatformState(current, platformState));
+        if (summary) {
+          showToast(`${summary.won}/${summary.count} settled as wins. Card bonus: ${formatCents(summary.bonusCents)}.`);
+        } else {
+          showToast("Match settled and account history updated.");
+        }
+        return;
+      } catch (error) {
+        return showToast(error instanceof Error ? error.message : "Unable to settle match.");
+      }
+    }
+
+    let settledPositions: SettledPosition[];
+    try {
+      settledPositions = await Promise.all(openPositions.map((position) => settlePositionApi(position, selectedMatch)));
+    } catch (error) {
+      return showToast(error instanceof Error ? error.message : "Unable to settle match.");
+    }
     const payout = settledPositions.reduce((sum, position) => sum + position.payoutCents, 0);
     const wonCount = settledPositions.filter((position) => position.won).length;
 
@@ -339,8 +446,18 @@ export function App() {
     showToast(`${wonCount}/${settledPositions.length} settled as wins. Card bonus: ${formatCents(bonus)}.`);
   }
 
-  function openStarterPack() {
+  async function openStarterPack() {
     if (!packAvailable) return;
+    if (state.userId) {
+      try {
+        const platformState = await openPlatformPack(state.userId);
+        setState((current) => mergePlatformState(current, platformState));
+        showToast(`Starter Pack opened: ${(platformState.awarded ?? []).map((id) => allCards.find((card) => card.id === id)?.name ?? id).join(", ")}.`);
+        return;
+      } catch (error) {
+        return showToast(error instanceof Error ? error.message : "Starter Pack is not available.");
+      }
+    }
     const awarded = Array.from({ length: 3 }, (_, index) => starterPackPool[index % starterPackPool.length].id);
     setState((current) => ({
       ...current,
@@ -348,6 +465,23 @@ export function App() {
       progress: { ...current.progress, packsOpened: current.progress.packsOpened + 1 },
     }));
     showToast(`Starter Pack opened: ${awarded.map((id) => allCards.find((card) => card.id === id)?.name).join(", ")}.`);
+  }
+
+  async function grantCredits(targetUserId: string, amountCents: number, adminToken: string) {
+    try {
+      const platformState = await grantPlatformCredits({
+        adminToken,
+        amountCents,
+        note: "Hackathon demo credit",
+        targetUserId,
+      });
+      if (targetUserId === state.userId) {
+        setState((current) => mergePlatformState(current, platformState));
+      }
+      showToast(`Credited ${formatCents(amountCents)} to ${targetUserId}.`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Unable to grant credits.");
+    }
   }
 
   function showToast(message: string) {
@@ -410,7 +544,7 @@ export function App() {
               <button className="login-button" type="button" onClick={connectWallet}>
                 Login
               </button>
-              <button className="signup-button" type="button" onClick={connectWallet}>
+              <button className="signup-button" type="button" onClick={signUp}>
                 Sign up
               </button>
             </div>
@@ -524,6 +658,8 @@ export function App() {
           ownedCounts={ownedCounts}
           packAvailable={packAvailable}
           state={state}
+          userId={state.userId}
+          onGrantCredits={grantCredits}
           onOpenPack={openStarterPack}
           onSelectView={setActiveView}
           onShowToast={showToast}
@@ -586,7 +722,7 @@ function FeaturedMarket({
   onChangeStake: (value: number) => void;
   onNextMatch: () => void;
   onOpenCardPicker: () => void;
-  onPlacePrediction: (targetMarketId?: string) => void;
+  onPlacePrediction: (targetMarketId?: string, outcome?: "yes" | "no") => void;
   onPreviousMatch: () => void;
   onSettle: () => void;
 }) {
@@ -645,16 +781,15 @@ function FeaturedMarket({
               label={primaryOutcome.label}
               logoUrl={primaryOutcome.logoUrl}
               teamCode={primaryOutcome.code}
-              onAction={() => onPlacePrediction(market.id)}
+              onAction={() => onPlacePrediction(market.id, "yes")}
             />
             <OutcomeRow
               actionLabel={formatPercentCents(noPercent)}
-              disabled={!secondaryMarketId}
               label={secondaryOutcome.label}
               logoUrl={secondaryOutcome.logoUrl}
               teamCode={secondaryOutcome.code}
               tone="secondary"
-              onAction={() => secondaryMarketId && onPlacePrediction(secondaryMarketId)}
+              onAction={() => onPlacePrediction(secondaryMarketId ?? market.id, secondaryMarketId ? "yes" : "no")}
             />
           </div>
 
@@ -848,6 +983,7 @@ function MarketCard({
   onSelect: () => void;
 }) {
   const [yesPercent, noPercent] = currentOutcomePercents(activity, item.market.oddsBps);
+  const [primaryOutcome, secondaryOutcome] = outcomeRows(item.market, item.match);
 
   return (
     <button className={`prediction-card ${isSelected ? "is-selected" : ""}`} type="button" onClick={onSelect}>
@@ -860,14 +996,14 @@ function MarketCard({
       </div>
       <div className="mini-outcomes">
         <div>
-          <span>Yes</span>
+          <span>{primaryOutcome.label}</span>
           <strong>{Math.round(yesPercent)}%</strong>
-          <em>Yes</em>
+          <em>{formatPercentCents(yesPercent)}</em>
         </div>
         <div>
-          <span>No</span>
+          <span>{secondaryOutcome.label}</span>
           <strong>{Math.round(noPercent)}%</strong>
-          <em>No</em>
+          <em>{formatPercentCents(noPercent)}</em>
         </div>
       </div>
       <MarketCardOdds odds={item.match.odds ?? []} />
@@ -913,6 +1049,7 @@ function LineupPreview({ match }: { match: MatchSnapshot }) {
         <TeamCompact code={match.homeCode} logoUrl={match.homeLogoUrl} name={match.home} />
         <TeamCompact alignRight code={match.awayCode} logoUrl={match.awayLogoUrl} name={match.away} />
       </div>
+      <MatchDataStrip match={match} />
       <div className="lineup-subhead">
         <span>{title}</span>
         <strong>{formatStart(match.startTime)}</strong>
@@ -938,6 +1075,29 @@ function LineupPreview({ match }: { match: MatchSnapshot }) {
       </div>
       <PreviousPlayerRatings match={match} />
     </section>
+  );
+}
+
+function MatchDataStrip({ match }: { match: MatchSnapshot }) {
+  const homeScore = match.score[match.home] ?? 0;
+  const awayScore = match.score[match.away] ?? 0;
+  return (
+    <div className="match-data-strip">
+      <div>
+        <span>{match.status}</span>
+        <strong>
+          {homeScore} - {awayScore}
+        </strong>
+      </div>
+      <div>
+        <span>{match.status === "SCHEDULED" ? "Kickoff" : "Minute"}</span>
+        <strong>{match.status === "SCHEDULED" ? formatStart(match.startTime) : match.minute}</strong>
+      </div>
+      <div>
+        <span>Fixture proof</span>
+        <strong>{match.oracleProof ?? `txline:${match.id}`}</strong>
+      </div>
+    </div>
   );
 }
 
@@ -994,6 +1154,8 @@ function AccountScreen({
   ownedCounts,
   packAvailable,
   state,
+  userId,
+  onGrantCredits,
   onOpenPack,
   onSelectView,
   onShowToast,
@@ -1004,6 +1166,8 @@ function AccountScreen({
   ownedCounts: Record<string, number>;
   packAvailable: boolean;
   state: AppState;
+  userId: string;
+  onGrantCredits: (targetUserId: string, amountCents: number, adminToken: string) => void;
   onOpenPack: () => void;
   onSelectView: (view: AccountView) => void;
   onShowToast: (message: string) => void;
@@ -1042,7 +1206,11 @@ function AccountScreen({
               </label>
               <label className="field">
                 <span>Wallet</span>
-                <input readOnly value="0x7A...91F" />
+                <input readOnly value={state.walletAddress || "Not connected"} />
+              </label>
+              <label className="field">
+                <span>User ID</span>
+                <input readOnly value={state.userId || "Create a session first"} />
               </label>
               <label className="field wide">
                 <span>Bio</span>
@@ -1079,6 +1247,11 @@ function AccountScreen({
                 <BadgeShelf badges={earnedBadges} />
               </div>
             </div>
+            <CreditDesk
+              defaultTargetUserId={userId}
+              ledger={state.ledger}
+              onGrantCredits={onGrantCredits}
+            />
           </div>
         )}
 
@@ -1138,6 +1311,81 @@ function MenuItem({ icon, label, onClick }: { icon: ReactNode; label: string; on
       {icon}
       {label}
     </button>
+  );
+}
+
+function CreditDesk({
+  defaultTargetUserId,
+  ledger,
+  onGrantCredits,
+}: {
+  defaultTargetUserId: string;
+  ledger: PlatformLedgerEntry[];
+  onGrantCredits: (targetUserId: string, amountCents: number, adminToken: string) => void;
+}) {
+  const [targetUserId, setTargetUserId] = useState(defaultTargetUserId);
+  const [amount, setAmount] = useState(250);
+  const [adminToken, setAdminToken] = useState("");
+
+  useEffect(() => {
+    setTargetUserId(defaultTargetUserId);
+  }, [defaultTargetUserId]);
+
+  return (
+    <div className="account-card credit-desk">
+      <SectionTitle eyebrow="Admin" title="Credit desk" />
+      <div className="credit-grid">
+        <label className="field">
+          <span>Target user</span>
+          <input value={targetUserId} onChange={(event) => setTargetUserId(event.target.value)} />
+        </label>
+        <label className="field">
+          <span>Credit amount</span>
+          <input
+            min={1}
+            step={25}
+            type="number"
+            value={amount}
+            onChange={(event) => setAmount(Math.max(0, Number(event.target.value)))}
+          />
+        </label>
+        <label className="field">
+          <span>Admin token</span>
+          <input
+            placeholder="ADMIN_CREDIT_SECRET"
+            type="password"
+            value={adminToken}
+            onChange={(event) => setAdminToken(event.target.value)}
+          />
+        </label>
+        <button
+          className="signup-button"
+          disabled={!targetUserId || !adminToken || amount <= 0}
+          type="button"
+          onClick={() => onGrantCredits(targetUserId, Math.round(amount * 100), adminToken)}
+        >
+          Grant credits
+        </button>
+      </div>
+      <LedgerList ledger={ledger} />
+    </div>
+  );
+}
+
+function LedgerList({ ledger }: { ledger: PlatformLedgerEntry[] }) {
+  if (!ledger.length) return <div className="event-empty">No ledger entries yet.</div>;
+  return (
+    <div className="ledger-list">
+      {ledger.slice(0, 6).map((entry) => (
+        <div className="ledger-row" key={entry.id}>
+          <span>{cleanMarketLabel(entry.type)}</span>
+          <strong className={entry.amountCents >= 0 ? "is-positive" : "is-negative"}>
+            {formatSignedCents(entry.amountCents)}
+          </strong>
+          <small>{entry.note || `Balance ${formatCents(entry.balanceAfterCents)}`}</small>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -1565,11 +1813,50 @@ function cardName(cards: CardDefinition[], cardId: string): string {
 function loadState(): AppState {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) return initialState;
-    return { ...initialState, ...JSON.parse(saved) } as AppState;
+    if (!saved) {
+      return { ...initialState, userId: localStorage.getItem(USER_ID_STORAGE_KEY) ?? "" };
+    }
+    const parsed = JSON.parse(saved) as Partial<AppState>;
+    return {
+      ...initialState,
+      ...parsed,
+      progress: { ...initialProgress, ...(parsed.progress ?? {}) },
+      ledger: parsed.ledger ?? [],
+      userId: parsed.userId || localStorage.getItem(USER_ID_STORAGE_KEY) || "",
+    } as AppState;
   } catch {
     return initialState;
   }
+}
+
+function mergePlatformState(current: AppState, platformState: PlatformUserState, extra: Partial<AppState> = {}): AppState {
+  return {
+    ...current,
+    ...extra,
+    connected: extra.connected ?? current.connected,
+    displayName: platformState.user.displayName,
+    inventory: platformState.inventory,
+    ledger: platformState.ledger,
+    locks: buildLocks(platformState.positions),
+    positions: platformState.positions,
+    progress: platformState.progress,
+    role: platformState.user.role,
+    settled: platformState.settled,
+    userId: platformState.user.id,
+    walletAddress: platformState.user.walletAddress,
+  };
+}
+
+function buildLocks(positions: PositionInput[]): Record<string, string[]> {
+  return positions.reduce<Record<string, string[]>>((acc, position) => {
+    acc[position.matchId] = [...(acc[position.matchId] ?? []), ...position.cardIds];
+    return acc;
+  }, {});
+}
+
+function demoWalletAddress(seed: string): string {
+  const clean = seed.replace(/[^a-zA-Z0-9]/g, "").padEnd(12, "0");
+  return `0x${clean.slice(0, 4)}...${clean.slice(-4)}`;
 }
 
 function pickLaunchMatch(matches: MatchSnapshot[]): MatchSnapshot | undefined {
@@ -1596,6 +1883,28 @@ function rankVolumeMarkets(items: MarketItem[], state: AppState): MarketItem[] {
     return activityB.volumeCents - activityA.volumeCents || impliedProbability(b.market.oddsBps) - impliedProbability(a.market.oddsBps);
   });
   return ranked;
+}
+
+function marketAppliesToMatch(market: MarketDefinition, match: MatchSnapshot): boolean {
+  if (!market.scope || market.scope === "all") return true;
+  if (market.scope === "world-cup") return isWorldCupFinal(match);
+  if (market.scope === "final") return isWorldCupFinal(match);
+  if (market.scope === "third-place") return isWorldCupThirdPlace(match);
+  return true;
+}
+
+function isWorldCupFinal(match: MatchSnapshot): boolean {
+  const participants = teamPairKey(match);
+  return participants === "argentina:spain";
+}
+
+function isWorldCupThirdPlace(match: MatchSnapshot): boolean {
+  const participants = teamPairKey(match);
+  return participants === "england:france";
+}
+
+function teamPairKey(match: MatchSnapshot): string {
+  return [match.home, match.away].map((team) => team.toLowerCase()).sort().join(":");
 }
 
 function getMarketActivity(state: AppState, match: MatchSnapshot, market: MarketDefinition): MarketActivity {
@@ -1661,12 +1970,14 @@ function outcomeRows(market: MarketDefinition, match: MatchSnapshot): [OutcomeDi
   if (market.id === "home-win") return [home, away];
   if (market.id === "away-win") return [away, home];
   return [
-    { ...home, label: "Yes" },
-    { ...away, label: "No" },
+    { code: "YES", label: "Yes" },
+    { code: "NO", label: "No" },
   ];
 }
 
 function marketTeam(match: MatchSnapshot, market: MarketDefinition): string {
+  if (market.contextTeam === "away") return match.away;
+  if (market.contextTeam === "none") return match.home;
   if (market.id === "away-win") return match.away;
   return match.home;
 }
@@ -1748,6 +2059,16 @@ function currentOutcomePercents(activity: MarketActivity, fallbackOddsBps: numbe
   if (latest) return [latest.yes, latest.no];
   const yes = impliedProbability(fallbackOddsBps);
   return [yes, 100 - yes];
+}
+
+function probabilityToOddsBps(percent: number): number {
+  const bounded = Math.max(1, Math.min(99, percent));
+  return Math.round((100 / bounded) * 10000);
+}
+
+function positionMarketLabel(market: MarketDefinition, match: MatchSnapshot, outcome: "yes" | "no"): string {
+  const side = outcome === "yes" ? "Yes" : "No";
+  return `${side}: ${marketQuestion(market, match)}`;
 }
 
 function formatLeaderboardMetric(
@@ -1851,18 +2172,43 @@ function flagUrlForCode(code: string): string {
 }
 
 function marketQuestion(market: MarketDefinition, match: MatchSnapshot): string {
+  if (market.question) return market.question;
   switch (market.id) {
     case "home-win":
     case "away-win":
       return worldCupResultQuestion(match) ?? `Who will win, ${match.home} or ${match.away}?`;
+    case "draw-after-90":
+      return `Will ${match.home} vs ${match.away} be tied after regulation?`;
     case "home-goal":
       return `Will ${match.home} score?`;
+    case "away-goal":
+      return `Will ${match.away} score?`;
+    case "home-2plus-goals":
+      return `Will ${match.home} score 2+ goals?`;
+    case "away-2plus-goals":
+      return `Will ${match.away} score 2+ goals?`;
+    case "home-first-goal":
+      return `Will ${match.home} score first?`;
     case "home-clean-sheet":
       return `Will ${match.home} keep a clean sheet?`;
+    case "away-clean-sheet":
+      return `Will ${match.away} keep a clean sheet?`;
+    case "home-possession-60":
+      return `Will ${match.home} finish with 60%+ possession?`;
+    case "away-possession-60":
+      return `Will ${match.away} finish with 60%+ possession?`;
+    case "home-most-corners":
+      return `Will ${match.home} take more corners?`;
+    case "away-most-corners":
+      return `Will ${match.away} take more corners?`;
     case "hat-trick-market":
       return `Will any player score a hat-trick?`;
+    case "poker-trick-market":
+      return `Will any player score 4 goals?`;
     case "mom-home-team":
       return `Will the match MVP come from ${match.home}?`;
+    case "mom-away-team":
+      return `Will the match MVP come from ${match.away}?`;
     default:
       return market.label;
   }
