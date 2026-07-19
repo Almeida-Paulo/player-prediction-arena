@@ -261,8 +261,13 @@ def map_txline_fixture(item: dict[str, Any]) -> dict[str, Any] | None:
     participant_1_is_home = parse_bool(first_value(item, "Participant1IsHome", "participant1IsHome"), True)
     home = participant_1 if participant_1_is_home else participant_2
     away = participant_2 if participant_1_is_home else participant_1
-    home_score, away_score = score_from_item(item, home, away, participant_1_is_home)
+    score_pair = score_from_item(item, home, away, participant_1_is_home)
     status = normalize_status(item)
+    score = (
+        {home: score_pair[0], away: score_pair[1]}
+        if score_pair is not None
+        else {home: 0, away: 0}
+    )
 
     return {
         "id": fixture_id,
@@ -280,7 +285,8 @@ def map_txline_fixture(item: dict[str, Any]) -> dict[str, Any] | None:
         "startTime": first_value(item, "StartTime", "startTime", "start_time"),
         "minute": str(first_value(item, "Minute", "minute") or ("FT" if status == "FINAL" else "0'")),
         "status": status,
-        "score": {home: home_score, away: away_score},
+        "score": score,
+        "scoreConfirmed": score_pair is not None,
         "stats": {
             home: {"possession": 50, "shotsAgainst": 0, "cornersAgainst": 0},
             away: {"possession": 50, "shotsAgainst": 0, "cornersAgainst": 0},
@@ -774,7 +780,16 @@ def prematch_as_of(match: dict[str, Any]) -> int | None:
 
 def apply_txline_score_snapshot(match: dict[str, Any], score_items: list[dict[str, Any]]) -> None:
     latest = max(score_items, key=score_sort_key)
-    participant_1_score, participant_2_score = score_pair_from_txline_score(latest)
+    score_candidates = [
+        (item, score_pair)
+        for item in score_items
+        if (score_pair := score_pair_from_txline_score(item))[0] is not None
+        and score_pair[1] is not None
+    ]
+    score_item = max(score_candidates, key=lambda candidate: score_sort_key(candidate[0])) if score_candidates else None
+
+    participant_1_score = score_item[1][0] if score_item else None
+    participant_2_score = score_item[1][1] if score_item else None
     if participant_1_score is not None and participant_2_score is not None:
         participant_1_is_home = bool(match.get("txlineParticipant1IsHome", True))
         home_score, away_score = (
@@ -783,12 +798,14 @@ def apply_txline_score_snapshot(match: dict[str, Any], score_items: list[dict[st
             else (participant_2_score, participant_1_score)
         )
         match["score"] = {match["home"]: home_score, match["away"]: away_score}
+        match["scoreConfirmed"] = True
 
     status = normalize_score_status(latest, match)
     if status:
         match["status"] = status
         match["minute"] = score_minute(latest, status)
-    match["scoreProof"] = f"txline-score:{match.get('id')}:{first_value(latest, 'id', 'seq', 'ts', 'Ts') or 'snapshot'}"
+    proof_item = score_item[0] if score_item else latest
+    match["scoreProof"] = f"txline-score:{match.get('id')}:{first_value(proof_item, 'id', 'seq', 'ts', 'Ts') or 'snapshot'}"
 
 
 def score_sort_key(item: dict[str, Any]) -> tuple[int, int]:
@@ -796,10 +813,16 @@ def score_sort_key(item: dict[str, Any]) -> tuple[int, int]:
 
 
 def score_pair_from_txline_score(item: dict[str, Any]) -> tuple[int | None, int | None]:
-    score = first_value(item, "score", "Score")
-    if not isinstance(score, dict):
-        return None, None
-    return participant_score(score, "Participant1"), participant_score(score, "Participant2")
+    for score_key in ["scoreSoccer", "ScoreSoccer", "score", "Score"]:
+        score = item.get(score_key)
+        if not isinstance(score, dict):
+            continue
+        participant_1 = participant_score(score, "Participant1")
+        participant_2 = participant_score(score, "Participant2")
+        if participant_1 is not None and participant_2 is not None:
+            return participant_1, participant_2
+
+    return score_pair_from_stats(item)
 
 
 def participant_score(score: dict[str, Any], participant_key: str) -> int | None:
@@ -808,6 +831,16 @@ def participant_score(score: dict[str, Any], participant_key: str) -> int | None
         return None
 
     for path in [
+        ("Total", "Goals"),
+        ("total", "goals"),
+        ("Total", "goals"),
+        ("total", "Goals"),
+        ("FT", "Goals"),
+        ("FullTime", "Goals"),
+        ("Current", "Goals"),
+        ("Period", "Goals"),
+        ("Goals",),
+        ("goals",),
         ("Total", "Score"),
         ("total", "score"),
         ("FT", "Score"),
@@ -816,10 +849,46 @@ def participant_score(score: dict[str, Any], participant_key: str) -> int | None
         ("Period", "Score"),
         ("Score",),
         ("score",),
-        ("Goals",),
-        ("goals",),
     ]:
         value = nested_value(participant, path)
+        if value not in (None, ""):
+            return safe_int(value)
+    return None
+
+
+def score_pair_from_stats(item: dict[str, Any]) -> tuple[int | None, int | None]:
+    stats = first_value(item, "Stats", "stats", "Statistics", "statistics")
+    if isinstance(stats, dict):
+        participant_1 = stat_value(stats, "1")
+        participant_2 = stat_value(stats, "2")
+        if participant_1 is not None and participant_2 is not None:
+            return participant_1, participant_2
+
+    if isinstance(stats, list):
+        participant_1 = stat_value_from_list(stats, 1)
+        participant_2 = stat_value_from_list(stats, 2)
+        if participant_1 is not None and participant_2 is not None:
+            return participant_1, participant_2
+
+    return None, None
+
+
+def stat_value(stats: dict[str, Any], key: str) -> int | None:
+    for candidate in [key, int(key), f"stat_{key}", f"Stat{key}"]:
+        value = stats.get(candidate)
+        if value not in (None, ""):
+            return safe_int(value)
+    return None
+
+
+def stat_value_from_list(stats: list[Any], key: int) -> int | None:
+    for item in stats:
+        if not isinstance(item, dict):
+            continue
+        stat_key = first_value(item, "key", "Key", "statKey", "StatKey", "statId", "StatId", "id", "Id")
+        if safe_int_or_none(stat_key) != key:
+            continue
+        value = first_value(item, "value", "Value", "statValue", "StatValue")
         if value not in (None, ""):
             return safe_int(value)
     return None
@@ -835,6 +904,16 @@ def nested_value(item: dict[str, Any], path: tuple[str, ...]) -> Any:
 
 
 def normalize_score_status(item: dict[str, Any], match: dict[str, Any]) -> str | None:
+    soccer_status = safe_int_or_none(first_value(item, "statusSoccerId", "StatusSoccerId"))
+    if soccer_status in {5, 10, 13}:
+        return "FINAL"
+    if soccer_status in {1}:
+        return "SCHEDULED"
+    if soccer_status in {2, 3, 4, 6, 7, 8, 9, 11, 12}:
+        return "LIVE"
+    if soccer_status in {14, 15, 16, 17, 18, 19}:
+        return "FINAL" if match_started(match) else "SCHEDULED"
+
     raw = " ".join(
         str(first_value(item, key) or "")
         for key in ["gameState", "GameState", "action", "Action", "status", "Status", "statusSoccerId", "StatusSoccerId"]
@@ -861,6 +940,11 @@ def normalize_score_status(item: dict[str, Any], match: dict[str, Any]) -> str |
 def score_minute(item: dict[str, Any], status: str) -> str:
     if status == "FINAL":
         return "FT"
+    soccer_status = safe_int_or_none(first_value(item, "statusSoccerId", "StatusSoccerId"))
+    if soccer_status == 3:
+        return "HT"
+    if soccer_status in {6, 11}:
+        return "WAIT"
     clock = first_value(item, "clock", "Clock")
     if isinstance(clock, dict):
         seconds = safe_int(first_value(clock, "seconds", "Seconds"))
@@ -888,7 +972,12 @@ def merge_match_snapshot(
     if status_rank(str(cached.get("status") or "")) > status_rank(str(incoming.get("status") or "")):
         merged["status"] = cached.get("status")
         merged["minute"] = cached.get("minute")
-        if not score_has_goals(incoming, incoming.get("home"), incoming.get("away")) and score_has_goals(cached, cached.get("home"), cached.get("away")):
+        if score_is_confirmed(cached) and not score_is_confirmed(incoming):
+            merged["score"] = cached.get("score")
+            merged["scoreConfirmed"] = True
+            if cached.get("scoreProof"):
+                merged["scoreProof"] = cached.get("scoreProof")
+        elif not score_has_goals(incoming, incoming.get("home"), incoming.get("away")) and score_has_goals(cached, cached.get("home"), cached.get("away")):
             merged["score"] = cached.get("score")
 
     if stats_are_default(incoming) and not stats_are_default(cached):
@@ -933,6 +1022,10 @@ def score_has_goals(match: dict[str, Any], home: Any, away: Any) -> bool:
     if not isinstance(score, dict):
         return False
     return safe_int(score.get(str(home or ""), 0)) + safe_int(score.get(str(away or ""), 0)) > 0
+
+
+def score_is_confirmed(match: dict[str, Any]) -> bool:
+    return bool(match.get("scoreConfirmed"))
 
 
 def stats_are_default(match: dict[str, Any]) -> bool:
@@ -985,9 +1078,13 @@ def normalize_status(item: dict[str, Any]) -> str:
     return "SCHEDULED"
 
 
-def score_from_item(item: dict[str, Any], home: str, away: str, participant_1_is_home: bool) -> tuple[int, int]:
+def score_from_item(item: dict[str, Any], home: str, away: str, participant_1_is_home: bool) -> tuple[int, int] | None:
+    participant_1_score, participant_2_score = score_pair_from_txline_score(item)
+    if participant_1_score is not None and participant_2_score is not None:
+        return (participant_1_score, participant_2_score) if participant_1_is_home else (participant_2_score, participant_1_score)
+
     score = first_value(item, "score", "Score")
-    if isinstance(score, dict):
+    if isinstance(score, dict) and (home in score or away in score):
         return safe_int(score.get(home, 0)), safe_int(score.get(away, 0))
 
     home_score = first_value(item, "HomeScore", "homeScore", "home_score")
@@ -1002,7 +1099,7 @@ def score_from_item(item: dict[str, Any], home: str, away: str, participant_1_is
         p2 = safe_int(participant_2_score)
         return (p1, p2) if participant_1_is_home else (p2, p1)
 
-    return 0, 0
+    return None
 
 
 def map_events(item: dict[str, Any], home: str, away: str) -> list[dict[str, Any]]:

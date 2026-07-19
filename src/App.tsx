@@ -1109,9 +1109,8 @@ function MatchResultsStrip({
   return (
     <section className="fixture-results-strip" aria-label="World Cup match results">
       {matches.slice(0, 6).map((match) => {
-        const homeScore = match.score[match.home] ?? 0;
-        const awayScore = match.score[match.away] ?? 0;
         const isScheduled = match.status === "SCHEDULED";
+        const hasScore = hasConfirmedScore(match);
         const topLabel = fixtureCardTopLabel(match);
         const bottomLabel = fixtureCardBottomLabel(match);
         return (
@@ -1130,8 +1129,8 @@ function MatchResultsStrip({
             <div className="fixture-card-center">
               <span>{topLabel}</span>
               <strong>
-                {isScheduled ? formatFixtureCardTime(match.startTime) : `${homeScore} - ${awayScore}`}
-                {!isScheduled && <i aria-hidden="true" />}
+                {isScheduled ? formatFixtureCardTime(match.startTime) : formatMatchScoreline(match)}
+                {!isScheduled && hasScore && <i aria-hidden="true" />}
               </strong>
               {bottomLabel && <small>{bottomLabel}</small>}
             </div>
@@ -1316,8 +1315,6 @@ function LineupPreview({ match }: { match: MatchSnapshot }) {
 }
 
 function MatchSummaryCard({ match }: { match: MatchSnapshot }) {
-  const homeScore = match.score[match.home] ?? 0;
-  const awayScore = match.score[match.away] ?? 0;
   const homeGoals = match.events.filter((event) => event.type === "goal" && sameTeam(event.team, match.home));
   const awayGoals = match.events.filter((event) => event.type === "goal" && sameTeam(event.team, match.away));
   const venue = [match.venueName, match.venueCity].filter(Boolean).join(", ");
@@ -1331,7 +1328,7 @@ function MatchSummaryCard({ match }: { match: MatchSnapshot }) {
         </div>
         <div className="summary-scoreline">
           <span>{matchStatusLabel(match)}</span>
-          <strong>{match.status === "SCHEDULED" ? "vs" : `${homeScore} - ${awayScore}`}</strong>
+          <strong>{match.status === "SCHEDULED" ? "vs" : formatMatchScoreline(match)}</strong>
           {match.status !== "SCHEDULED" && <em>{match.minute}</em>}
         </div>
         <div className="summary-team away">
@@ -2580,6 +2577,11 @@ function isWorldCupThirdPlace(match: MatchSnapshot): boolean {
   return participants === "england:france";
 }
 
+function isWorldCupSemifinal(match: MatchSnapshot): boolean {
+  const participants = teamPairKey(match);
+  return participants === "argentina:england" || participants === "france:spain";
+}
+
 function teamPairKey(match: MatchSnapshot): string {
   return [match.home, match.away].map((team) => team.toLowerCase()).sort().join(":");
 }
@@ -2997,32 +2999,45 @@ function formatTransferDate(value: string): string {
 }
 
 function matchStatusLabel(match: MatchSnapshot): string {
-  if (match.status === "FINAL") return "Final";
+  if (match.status === "FINAL") return "FT";
   if (match.status === "LIVE") return match.minute || "Live";
   return "Scheduled";
 }
 
 function fixtureCardTopLabel(match: MatchSnapshot): string {
   const stage = fixtureStageLabel(match);
-  if (match.status === "SCHEDULED") return stage || "Upcoming";
-  return stage && stage.toLowerCase() !== "final"
-    ? stage
-    : `${matchStatusLabel(match)} - ${formatFixtureDateShort(match.startTime)}`;
+  if (stage) return stage;
+  if (match.status === "SCHEDULED") return "Upcoming";
+  return `${matchStatusLabel(match)} - ${formatFixtureDateShort(match.startTime)}`;
 }
 
 function fixtureCardBottomLabel(match: MatchSnapshot): string {
   const date = formatFixtureDateShort(match.startTime);
   if (match.status === "SCHEDULED") return date;
   const stage = fixtureStageLabel(match);
-  return stage && stage.toLowerCase() !== "final" ? `${matchStatusLabel(match)} - ${date}` : "";
+  return stage ? `${matchStatusLabel(match)} - ${date}` : "";
 }
 
 function fixtureStageLabel(match: MatchSnapshot): string {
   const round = cleanFixtureRound(match.round);
-  if (round && !["scheduled", "live", "final"].includes(round.toLowerCase())) return round;
-  if (isWorldCupFinal(match)) return "Final";
+  if (isWorldCupFinal(match)) return "World Cup Final";
   if (isWorldCupThirdPlace(match)) return "Third place";
-  return round || "";
+  if (isWorldCupSemifinal(match)) return "Semifinal";
+  if (round && !["scheduled", "live", "final"].includes(round.toLowerCase())) return round;
+  return "";
+}
+
+function formatMatchScoreline(match: MatchSnapshot): string {
+  if (!hasConfirmedScore(match)) return "TBD";
+  const homeScore = match.score[match.home] ?? 0;
+  const awayScore = match.score[match.away] ?? 0;
+  return `${homeScore} - ${awayScore}`;
+}
+
+function hasConfirmedScore(match: MatchSnapshot): boolean {
+  if (match.status === "SCHEDULED") return false;
+  if (match.scoreConfirmed) return true;
+  return match.source !== "txline";
 }
 
 function cleanFixtureRound(value?: string | null): string {

@@ -150,6 +150,7 @@ export interface MatchSnapshot {
   minute: string;
   status: "SCHEDULED" | "LIVE" | "FINAL";
   score: Record<string, number>;
+  scoreConfirmed?: boolean;
   stats: Record<string, TeamStats>;
   ratings: Record<string, number>;
   mom: string;
