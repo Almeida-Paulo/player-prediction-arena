@@ -10,10 +10,11 @@ import type {
 } from "./types";
 
 export function settlePosition(match: MatchSnapshot, position: PositionInput): SettledPosition {
-  const market = markets.find((item) => item.id === position.marketId);
-  if (!market) {
-    throw new Error(`Unknown market: ${position.marketId}`);
-  }
+  const market = markets.find((item) => item.id === position.marketId) ?? {
+    id: position.marketId,
+    dataSource: "manual",
+    settlementKey: "manual",
+  } as MarketDefinition;
   if (!canSettleMarket(market, match)) {
     throw new Error(`Market cannot be settled yet: ${market.id}`);
   }

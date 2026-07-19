@@ -3,7 +3,7 @@
 ## Real sports data
 
 - TXLine/TXODDS is the required source for World Cup fixtures, match identity, kickoff time, status, score path, and 1X2 consensus odds.
-- API-FOOTBALL is optional and enriches the TXLine fixture with lineups, team logos, match statistics, events, and player ratings when `API_FOOTBALL_KEY` is configured.
+- API-FOOTBALL is optional and enriches the TXLine fixture with lineups, team logos, match statistics, events, player ratings, and available transfers when `API_FOOTBALL_KEY` is configured.
 - TXLine match snapshots are persisted in PostgreSQL so completed matches can remain visible as history after they disappear from the current live snapshot.
 - The app must not render fake players, fake lineups, fake scores, or fake team logos as if they came from an API.
 
@@ -21,6 +21,7 @@ These records are created by Prediction Arena and stored in PostgreSQL:
 - opened packs
 - settled predictions
 - leaderboard data derived from platform users
+- admin-created seed markets and authenticated user-created manual markets
 
 New users start with zero internal balance. Rewards presents that balance as an internal USDC-style balance. The admin distributes test credits through `POST /api/admin/credits`, protected by an authenticated admin session whose Google-verified email is listed in server-side `ADMIN_EMAILS`.
 

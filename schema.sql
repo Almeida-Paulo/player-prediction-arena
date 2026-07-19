@@ -159,6 +159,26 @@ CREATE TABLE IF NOT EXISTS point_entries (
 CREATE INDEX IF NOT EXISTS idx_point_entries_user_time
   ON point_entries(user_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS platform_markets (
+  id TEXT PRIMARY KEY,
+  creator_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  creator_role TEXT NOT NULL DEFAULT 'user',
+  match_id TEXT NOT NULL DEFAULT '',
+  label TEXT NOT NULL,
+  question TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'future',
+  odds_bps INTEGER NOT NULL DEFAULT 20000,
+  settlement_key TEXT NOT NULL DEFAULT 'manual',
+  context_team TEXT NOT NULL DEFAULT 'none',
+  data_source TEXT NOT NULL DEFAULT 'manual',
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_platform_markets_match
+  ON platform_markets(match_id);
+
 CREATE TABLE IF NOT EXISTS earned_badges (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   badge_id TEXT NOT NULL,

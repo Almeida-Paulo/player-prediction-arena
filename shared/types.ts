@@ -74,6 +74,9 @@ export interface MarketDefinition {
   contextTeam?: "home" | "away" | "none";
   dataSource?: "txline" | "api-football" | "platform" | "manual";
   marketNote?: string;
+  createdBy?: string;
+  creatorRole?: "admin" | "user";
+  fixtureId?: string;
 }
 
 export interface TeamStats {
@@ -122,6 +125,15 @@ export interface TxLineOddsEntry {
   source: "txline";
 }
 
+export interface MatchTransfer {
+  playerName: string;
+  date?: string;
+  type?: string;
+  fromTeam?: string;
+  toTeam?: string;
+  source: "api-football";
+}
+
 export interface MatchSnapshot {
   id: string;
   home: string;
@@ -148,6 +160,7 @@ export interface MatchSnapshot {
   events: MatchEvent[];
   odds?: TxLineOddsEntry[];
   lineups?: Record<string, TeamLineup>;
+  transfers?: MatchTransfer[];
 }
 
 export interface PositionContext {

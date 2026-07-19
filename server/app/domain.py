@@ -174,7 +174,7 @@ def starter_pack_pool() -> list[Card]:
 def settle_position(match: dict[str, Any], position: dict[str, Any]) -> dict[str, Any]:
     market = next((item for item in MARKETS if item["id"] == position["marketId"]), None)
     if not market:
-        raise ValueError(f"unknown market: {position['marketId']}")
+        market = {"id": position["marketId"], "settlementKey": "manual", "dataSource": "manual"}
     if not can_settle_market(market, match):
         raise ValueError(f"market_not_settleable:{market['id']}")
 

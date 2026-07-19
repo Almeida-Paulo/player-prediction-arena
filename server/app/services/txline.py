@@ -23,23 +23,23 @@ async def fetch_txline_matches(settings: Settings) -> list[dict[str, Any]] | Non
         async with httpx.AsyncClient(timeout=15) as client:
             guest_jwt = settings.txline_guest_jwt or await start_guest_session(client, base)
             if not guest_jwt:
-                return None
+                return load_txline_match_snapshots() or None
 
             response = await fetch_fixtures_snapshot(client, base, settings, guest_jwt)
 
             if response.status_code == 401 and not settings.txline_guest_jwt:
                 guest_jwt = await start_guest_session(client, base)
                 if not guest_jwt:
-                    return None
+                    return load_txline_match_snapshots() or None
                 response = await fetch_fixtures_snapshot(client, base, settings, guest_jwt)
 
             if response.status_code >= 400:
-                return None
+                return load_txline_match_snapshots() or None
 
             try:
                 payload = response.json()
             except ValueError:
-                return None
+                return load_txline_match_snapshots() or None
 
             if isinstance(payload, list):
                 items = payload
@@ -534,6 +534,12 @@ def save_txline_match_snapshots(matches: list[dict[str, Any]]) -> None:
                 fixture_id = str(match.get("id") or "")
                 if not fixture_id:
                     continue
+                existing_row = conn.execute(
+                    "SELECT match_json FROM match_snapshots WHERE fixture_id = %s",
+                    (fixture_id,),
+                ).fetchone()
+                existing_match = coerce_match_json(existing_row["match_json"]) if existing_row else None
+                saved_match = merge_match_snapshot(existing_match, match)
                 conn.execute(
                     """
                     INSERT INTO match_snapshots (fixture_id, match_json, source, status, start_time, fetched_at, updated_at)
@@ -548,10 +554,10 @@ def save_txline_match_snapshots(matches: list[dict[str, Any]]) -> None:
                     """,
                     (
                         fixture_id,
-                        json.dumps(match),
-                        str(match.get("source") or "txline"),
-                        str(match.get("status") or ""),
-                        safe_int_or_none(match.get("startTime")),
+                        json.dumps(saved_match),
+                        str(saved_match.get("source") or "txline"),
+                        str(saved_match.get("status") or ""),
+                        safe_int_or_none(saved_match.get("startTime")),
                     ),
                 )
     except Exception as exc:
@@ -578,16 +584,14 @@ def load_txline_match_snapshots(limit: int = 12) -> list[dict[str, Any]]:
 
     output: list[dict[str, Any]] = []
     for row in rows:
-        match_json = row["match_json"]
-        if isinstance(match_json, dict):
-            output.append(match_json)
-        elif isinstance(match_json, str):
-            try:
-                loaded = json.loads(match_json)
-            except ValueError:
-                continue
-            if isinstance(loaded, dict):
-                output.append(loaded)
+        match = coerce_match_json(row["match_json"])
+        if not match:
+            continue
+        if not match.get("odds"):
+            cached_odds = load_txline_odds_snapshot(str(match.get("id") or ""))
+            if cached_odds:
+                match["odds"] = sorted(cached_odds, key=odds_sort_key)[:24]
+        output.append(match)
     return output
 
 
@@ -598,8 +602,90 @@ def merge_cached_matches(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
     merged = {str(match.get("id")): match for match in cached if match.get("id")}
     for match in matches:
         if match.get("id"):
-            merged[str(match["id"])] = match
+            key = str(match["id"])
+            merged[key] = merge_match_snapshot(merged.get(key), match)
     return sorted(merged.values(), key=lambda item: safe_int(item.get("startTime")), reverse=True)
+
+
+def merge_match_snapshot(
+    cached: dict[str, Any] | None,
+    incoming: dict[str, Any],
+) -> dict[str, Any]:
+    if not cached:
+        return dict(incoming)
+
+    merged = {**cached, **incoming}
+    for field in ["odds", "events", "lineups", "ratings", "transfers"]:
+        if is_empty_detail(incoming.get(field)) and not is_empty_detail(cached.get(field)):
+            merged[field] = cached[field]
+
+    for field in ["homeLogoUrl", "awayLogoUrl", "venueName", "venueCity", "detailSource", "detailProviderFixtureId"]:
+        if not incoming.get(field) and cached.get(field):
+            merged[field] = cached[field]
+
+    if status_rank(str(cached.get("status") or "")) > status_rank(str(incoming.get("status") or "")):
+        merged["status"] = cached.get("status")
+        merged["minute"] = cached.get("minute")
+        if not score_has_goals(incoming, incoming.get("home"), incoming.get("away")) and score_has_goals(cached, cached.get("home"), cached.get("away")):
+            merged["score"] = cached.get("score")
+
+    if stats_are_default(incoming) and not stats_are_default(cached):
+        merged["stats"] = cached.get("stats")
+
+    return merged
+
+
+def coerce_match_json(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            loaded = json.loads(value)
+        except ValueError:
+            return None
+        return dict(loaded) if isinstance(loaded, dict) else None
+    return None
+
+
+def is_empty_detail(value: Any) -> bool:
+    if value in (None, ""):
+        return True
+    if isinstance(value, (list, dict)):
+        return len(value) == 0
+    return False
+
+
+def status_rank(value: str) -> int:
+    normalized = value.upper()
+    if normalized == "FINAL":
+        return 3
+    if normalized == "LIVE":
+        return 2
+    if normalized == "SCHEDULED":
+        return 1
+    return 0
+
+
+def score_has_goals(match: dict[str, Any], home: Any, away: Any) -> bool:
+    score = match.get("score")
+    if not isinstance(score, dict):
+        return False
+    return safe_int(score.get(str(home or ""), 0)) + safe_int(score.get(str(away or ""), 0)) > 0
+
+
+def stats_are_default(match: dict[str, Any]) -> bool:
+    stats = match.get("stats")
+    if not isinstance(stats, dict) or not stats:
+        return True
+    for values in stats.values():
+        if not isinstance(values, dict):
+            continue
+        if safe_int(values.get("shotsAgainst")) or safe_int(values.get("cornersAgainst")):
+            return False
+        possession = safe_int(values.get("possession"))
+        if possession not in {0, 50}:
+            return False
+    return True
 
 
 def first_value(item: dict[str, Any], *keys: str) -> Any:

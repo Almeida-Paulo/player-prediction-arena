@@ -374,6 +374,10 @@ p {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.insight-column > .fixture-results-strip {
+  grid-template-columns: 1fr;
+}
+
 .fixture-result-card {
   background: #fff;
   cursor: pointer;
@@ -440,6 +444,37 @@ p {
 .fixture-result-card small {
   color: var(--muted);
   font-size: 12px;
+  font-weight: 650;
+}
+
+.transfer-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.transfer-list {
+  display: grid;
+  gap: 6px;
+}
+
+.transfer-row {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 3px;
+  padding: 10px 2px 4px;
+}
+
+.transfer-row strong {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 780;
+}
+
+.transfer-row span,
+.transfer-row em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
   font-weight: 650;
 }
 
@@ -529,6 +564,19 @@ p {
   background: var(--surface-hover);
 }
 
+.creator-pill {
+  align-items: center;
+  background: var(--accent-soft);
+  border: 1px solid rgba(0, 169, 90, 0.18);
+  border-radius: 999px;
+  color: var(--accent-dark);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 760;
+  min-height: 32px;
+  padding: 0 11px;
+}
+
 .match-switcher {
   align-items: center;
   background: var(--surface-soft);
@@ -597,7 +645,7 @@ p {
   align-items: center;
   display: grid;
   gap: 12px;
-  grid-template-columns: 42px minmax(0, 1fr) 72px;
+  grid-template-columns: 42px minmax(0, 1fr) 88px;
   min-height: 58px;
 }
 
@@ -615,8 +663,9 @@ p {
 .outcome-button {
   justify-self: end;
   min-height: 36px;
-  min-width: 76px;
-  padding: 0 14px;
+  min-width: 88px;
+  padding: 0 12px;
+  white-space: nowrap;
 }
 
 .stableprice-strip {
@@ -1469,7 +1518,31 @@ p {
   font-weight: 780;
 }
 
+.market-composer-modal {
+  max-width: 560px;
+}
+
+.composer-footer {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding-top: 16px;
+}
+
+.composer-footer p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+  margin: 0;
+}
+
 .section-title {
+  align-items: end;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
   margin-bottom: 14px;
 }
 
@@ -1477,6 +1550,26 @@ p {
   font-size: 26px;
   line-height: 1;
   margin: 0;
+}
+
+.section-action-button {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--accent-dark);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 760;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+}
+
+.section-action-button:hover {
+  background: var(--accent-soft);
+  border-color: rgba(0, 169, 90, 0.24);
 }
 
 .prediction-grid {
@@ -1487,6 +1580,7 @@ p {
 
 .prediction-card {
   color: var(--ink);
+  cursor: pointer;
   display: grid;
   gap: 16px;
   min-height: 178px;
@@ -1507,6 +1601,51 @@ p {
 
 .card-title-row {
   gap: 10px;
+}
+
+.market-card-icon {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--accent-dark);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 42px;
+  justify-content: center;
+  position: relative;
+  width: 42px;
+}
+
+.market-card-icon.teams {
+  background: #ffffff;
+}
+
+.market-card-icon.teams .team-avatar {
+  height: 27px;
+  position: absolute;
+  width: 27px;
+}
+
+.market-card-icon.teams .team-avatar:first-child {
+  left: 3px;
+  top: 5px;
+  z-index: 2;
+}
+
+.market-card-icon.teams .team-avatar:last-child {
+  bottom: 5px;
+  right: 3px;
+}
+
+.market-card-icon.future {
+  background: #fff8e8;
+  color: #b26b00;
+}
+
+.market-card-icon.stats {
+  background: #edf7ff;
+  color: #1f73b7;
 }
 
 .card-title-row span {
@@ -1574,7 +1713,7 @@ p {
   align-items: center;
   display: grid;
   gap: 8px;
-  grid-template-columns: minmax(0, 1fr) 54px 44px;
+  grid-template-columns: minmax(0, 1fr) 54px 52px;
 }
 
 .mini-outcomes span {
@@ -1586,18 +1725,23 @@ p {
   text-align: right;
 }
 
-.mini-outcomes em {
+.mini-buy-button {
   background: #dcf8e9;
+  border: 0;
   border-radius: 6px;
   color: #087a42;
   font-size: 13px;
-  font-style: normal;
   font-weight: 820;
+  min-height: 30px;
   padding: 5px 7px;
   text-align: center;
 }
 
-.mini-outcomes div:last-child em {
+.mini-buy-button:hover {
+  filter: brightness(0.98);
+}
+
+.mini-buy-button.no {
   background: #ffeded;
   color: #d14343;
 }
@@ -1620,11 +1764,6 @@ p {
   padding: 14px;
 }
 
-.lineup-top {
-  gap: 12px;
-  justify-content: space-between;
-}
-
 .team-compact {
   gap: 8px;
   min-width: 0;
@@ -1645,12 +1784,11 @@ p {
 
 .match-summary-card {
   background: #ffffff;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: 10px;
   display: grid;
   gap: 12px;
-  margin-top: 12px;
-  padding: 12px;
+  padding: 2px 2px 10px;
 }
 
 .match-summary-score {
@@ -1698,7 +1836,7 @@ p {
 .summary-scoreline strong {
   color: #636b74;
   display: block;
-  font-size: 27px;
+  font-size: 25px;
   font-weight: 760;
   line-height: 1.05;
   margin: 2px 0;
@@ -1748,13 +1886,13 @@ p {
 
 .lineup-subhead {
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 730;
+  font-size: 11px;
+  font-weight: 680;
   margin: 12px 0 10px;
 }
 
 .lineup-subhead span {
-  text-transform: uppercase;
+  text-transform: lowercase;
 }
 
 .pitch-surface {
@@ -2578,7 +2716,7 @@ p {
 
   .outcome-row {
     gap: 10px;
-    grid-template-columns: 38px minmax(0, 1fr) 82px;
+    grid-template-columns: 38px minmax(0, 1fr) 92px;
     min-height: 62px;
   }
 
@@ -2589,7 +2727,7 @@ p {
   .outcome-button {
     font-size: 16px;
     min-height: 42px;
-    min-width: 82px;
+    min-width: 92px;
   }
 
   .stableprice-strip {
@@ -2753,7 +2891,7 @@ p {
   }
 
   .mini-outcomes div {
-    grid-template-columns: minmax(0, 1fr) 54px 46px;
+    grid-template-columns: minmax(0, 1fr) 54px 52px;
   }
 
   .mini-outcomes span,

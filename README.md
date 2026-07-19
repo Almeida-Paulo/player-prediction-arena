@@ -526,6 +526,14 @@ Criar posicao persistente:
 POST /api/users/{user_id}/positions
 ```
 
+Criar market autenticado:
+
+```text
+POST /api/markets
+```
+
+Markets criados por usuario entram como `manual`, ou seja, podem receber posicoes, mas precisam de revisao/admin/oraculo antes de settlement automatico.
+
 Abrir Starter Pack persistente:
 
 ```text

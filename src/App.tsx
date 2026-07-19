@@ -4,8 +4,6 @@ import {
   Bookmark,
   Check,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   CircleDollarSign,
   Clock3,
   Gift,
@@ -18,6 +16,7 @@ import {
   MapPin,
   Medal,
   PackageOpen,
+  Plus,
   Search,
   ShieldCheck,
   Trophy,
@@ -59,6 +58,7 @@ import {
 } from "./platform-activity";
 import {
   createPlatformPosition,
+  createPlatformMarket,
   createSolanaChallenge,
   getCatalog,
   getCurrentUser,
@@ -203,6 +203,7 @@ export function App() {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [cardPickerOpen, setCardPickerOpen] = useState(false);
+  const [marketComposerOpen, setMarketComposerOpen] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode | null>(null);
 
   useEffect(() => {
@@ -259,19 +260,24 @@ export function App() {
     };
   }, []);
 
+  const featuredMatch = useMemo(() => pickLaunchMatch(matches), [matches]);
+  const featuredMarket = useMemo(
+    () => markets.find((market) => market.id === "home-win") ?? markets[0],
+    [markets],
+  );
   const selectedMatch = useMemo(
-    () => matches.find((match) => match.id === state.selectedMatchId) ?? matches[0],
-    [matches, state.selectedMatchId],
+    () => matches.find((match) => match.id === state.selectedMatchId) ?? featuredMatch ?? matches[0],
+    [featuredMatch, matches, state.selectedMatchId],
   );
 
   const selectedMarket = useMemo(
-    () => markets.find((market) => market.id === state.selectedMarketId) ?? markets[0],
-    [markets, state.selectedMarketId],
+    () => markets.find((market) => market.id === state.selectedMarketId) ?? featuredMarket ?? markets[0],
+    [featuredMarket, markets, state.selectedMarketId],
   );
 
   const marketItems = useMemo<MarketItem[]>(
-    () => matches.flatMap((match) => markets.filter((market) => marketAppliesToMatch(market, match)).map((market) => ({ match, market }))),
-    [matches, markets],
+    () => buildLaunchMarketItems(matches, markets, featuredMatch?.id),
+    [featuredMatch?.id, matches, markets],
   );
 
   const selectedCards = useMemo(
@@ -285,17 +291,14 @@ export function App() {
 
   const ownedCounts = useMemo(() => countCards(state.inventory), [state.inventory]);
   const packAvailable = state.connected && state.progress.totalBets >= 10 && state.progress.packsOpened === 0;
-  const lockedForMatch = new Set(state.locks[selectedMatch?.id ?? ""] ?? []);
-  const openPositions = selectedMatch
-    ? state.positions.filter((position) => position.matchId === selectedMatch.id)
-    : [];
+  const lockedForMatch = new Set(state.locks[featuredMatch?.id ?? ""] ?? []);
   const earnedBadges = getEarnedBadges(state, allCards);
-  const potentialGross = selectedMarket ? Math.floor((stake * selectedMarket.oddsBps) / 10000) : 0;
+  const potentialGross = featuredMarket ? Math.floor((stake * featuredMarket.oddsBps) / 10000) : 0;
   const potentialProfit = Math.max(0, potentialGross - stake);
   const maxBonusBps = selectedCards.reduce((sum, card) => sum + card.bonusBps, 0);
   const maxBonus = Math.floor((potentialProfit * maxBonusBps) / 10000);
   const featuredActivity =
-    selectedMatch && selectedMarket ? getMarketActivity(state, selectedMatch, selectedMarket) : emptyActivity();
+    featuredMatch && featuredMarket ? getMarketActivity(state, featuredMatch, featuredMarket) : emptyActivity();
   const trendingItems = useMemo(() => rankTrendingMarkets(marketItems, state).slice(0, 3), [marketItems, state]);
   const highestVolumeItems = useMemo(() => rankVolumeMarkets(marketItems, state).slice(0, 3), [marketItems, state]);
 
@@ -373,24 +376,21 @@ export function App() {
     setHistoricCardId("");
     setCardPickerOpen(false);
     setActiveView("home");
-    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function selectAdjacentMatch(direction: -1 | 1) {
-    if (!selectedMatch || matches.length < 2) return;
-    const currentIndex = Math.max(0, matches.findIndex((match) => match.id === selectedMatch.id));
-    const nextIndex = (currentIndex + direction + matches.length) % matches.length;
-    selectMatch(matches[nextIndex].id);
-  }
-
-  async function placePrediction(targetMarketId = selectedMarket?.id, outcome: "yes" | "no" = "yes") {
+  async function placePrediction(
+    targetMatch = featuredMatch,
+    targetMarketId = featuredMarket?.id,
+    outcome: "yes" | "no" = "yes",
+  ) {
     if (!state.connected) return showToast("Login before placing predictions.");
     const targetMarket = markets.find((market) => market.id === targetMarketId) ?? selectedMarket;
-    if (!selectedMatch || !targetMarket) return showToast("Select an available World Cup market.");
+    if (!targetMatch || !targetMarket) return showToast("Select an available World Cup market.");
     if (stake <= 0) return showToast("Stake must be greater than zero.");
     if (stake > state.progress.balanceCents) return showToast("Insufficient balance.");
 
-    const blockedCard = selectedCards.find((card) => lockedForMatch.has(card.id));
+    const lockedForTargetMatch = new Set(state.locks[targetMatch.id] ?? []);
+    const blockedCard = selectedCards.find((card) => lockedForTargetMatch.has(card.id));
     if (blockedCard) return showToast(`${blockedCard.name} is already locked for this match.`);
 
     const byType = selectedCards.reduce<Record<CardType, number>>(
@@ -405,16 +405,16 @@ export function App() {
     }
 
     const context = {
-      team: marketTeam(selectedMatch, targetMarket),
-      player: targetMarket.id === "mom-home-team" ? selectedMatch.mom : topRatedPlayer(selectedMatch),
+      team: marketTeam(targetMatch, targetMarket),
+      player: targetMarket.id === "mom-home-team" ? targetMatch.mom : topRatedPlayer(targetMatch),
     };
-    const [yesPercent, noPercent] = currentOutcomePercents(getMarketActivity(state, selectedMatch, targetMarket), targetMarket.oddsBps);
+    const [yesPercent, noPercent] = currentOutcomePercents(getMarketActivity(state, targetMatch, targetMarket), targetMarket.oddsBps);
     const displayedOddsBps = probabilityToOddsBps(outcome === "no" ? noPercent : yesPercent);
     const position: PositionInput = {
       id: crypto.randomUUID(),
-      matchId: selectedMatch.id,
+      matchId: targetMatch.id,
       marketId: targetMarket.id,
-      marketLabel: positionMarketLabel(targetMarket, selectedMatch, outcome),
+      marketLabel: positionMarketLabel(targetMarket, targetMatch, outcome),
       outcome,
       stakeCents: stake,
       oddsBps: displayedOddsBps,
@@ -427,10 +427,11 @@ export function App() {
         const platformState = await createPlatformPosition(state.userId, position);
         setState((current) =>
           mergePlatformState(current, platformState, {
+            selectedMatchId: targetMatch.id,
             selectedMarketId: targetMarket.id,
           }),
         );
-        showToast("Prediction placed. Balance, cards and history were saved.");
+        showToast("Prediction registered in PostgreSQL. Balance, cards and history were updated.");
         return;
       } catch (error) {
         return showToast(error instanceof Error ? error.message : "Unable to place prediction.");
@@ -446,14 +447,14 @@ export function App() {
         totalBets: current.progress.totalBets + 1,
         matchBetCounts: {
           ...current.progress.matchBetCounts,
-          [selectedMatch.id]: (current.progress.matchBetCounts[selectedMatch.id] ?? 0) + 1,
+          [targetMatch.id]: (current.progress.matchBetCounts[targetMatch.id] ?? 0) + 1,
         },
       },
       positions: [...current.positions, position],
       locks: {
         ...current.locks,
-        [selectedMatch.id]: [
-          ...(current.locks[selectedMatch.id] ?? []),
+        [targetMatch.id]: [
+          ...(current.locks[targetMatch.id] ?? []),
           ...selectedCards.map((card) => card.id),
         ],
       },
@@ -461,13 +462,14 @@ export function App() {
     showToast("Prediction placed locally. Backend user state is unavailable.");
   }
 
-  async function settleMatch() {
-    if (!selectedMatch) return;
-    if (!openPositions.length) return showToast("No open predictions on this match.");
+  async function settleMatch(targetMatch = featuredMatch) {
+    if (!targetMatch) return;
+    const matchOpenPositions = state.positions.filter((position) => position.matchId === targetMatch.id);
+    if (!matchOpenPositions.length) return showToast("No open predictions on this match.");
 
     if (state.userId) {
       try {
-        const platformState = await settlePlatformMatch(state.userId, selectedMatch.id);
+        const platformState = await settlePlatformMatch(state.userId, targetMatch.id);
         const summary = (platformState as PlatformUserState & {
           settledSummary?: { count: number; won: number; bonusCents: number };
         }).settledSummary;
@@ -485,7 +487,7 @@ export function App() {
 
     let settledPositions: SettledPosition[];
     try {
-      settledPositions = await Promise.all(openPositions.map((position) => settlePositionApi(position, selectedMatch)));
+      settledPositions = await Promise.all(matchOpenPositions.map((position) => settlePositionApi(position, targetMatch)));
     } catch (error) {
       return showToast(error instanceof Error ? error.message : "Unable to settle match.");
     }
@@ -509,9 +511,9 @@ export function App() {
           riskManagedWins,
           oracleSettlements: current.progress.oracleSettlements + settledPositions.length,
         },
-        positions: current.positions.filter((position) => position.matchId !== selectedMatch.id),
+        positions: current.positions.filter((position) => position.matchId !== targetMatch.id),
         settled: [...settledPositions, ...current.settled],
-        locks: { ...current.locks, [selectedMatch.id]: [] },
+        locks: { ...current.locks, [targetMatch.id]: [] },
       };
     });
 
@@ -569,6 +571,30 @@ export function App() {
       showToast(`Credited ${formatPoints(points)} to ${targetUserId}.`);
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Unable to grant points.");
+    }
+  }
+
+  async function createMarket(question: string, matchId: string) {
+    if (!state.connected) {
+      setAuthMode("signup");
+      return showToast("Create an account before opening a market.");
+    }
+    try {
+      const { market } = await createPlatformMarket({
+        label: question.replace(/\?$/, ""),
+        matchId,
+        question,
+      });
+      setMarkets((current) => [market, ...current.filter((item) => item.id !== market.id)]);
+      setState((current) => ({
+        ...current,
+        selectedMatchId: matchId || current.selectedMatchId,
+        selectedMarketId: market.id,
+      }));
+      setMarketComposerOpen(false);
+      showToast("Market created and saved to PostgreSQL.");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Unable to create market.");
     }
   }
 
@@ -654,23 +680,19 @@ export function App() {
       {activeView === "home" ? (
         <main className="arena-layout">
           <section className="primary-column" aria-label="World Cup markets">
-            {selectedMatch && selectedMarket ? (
+            {featuredMatch && featuredMarket ? (
               <FeaturedMarket
                 activity={featuredActivity}
-                market={selectedMarket}
-                match={selectedMatch}
-                matchIndex={Math.max(0, matches.findIndex((match) => match.id === selectedMatch.id))}
+                market={featuredMarket}
+                match={featuredMatch}
                 maxBonus={maxBonus}
-                matchTotal={matches.length}
                 potentialGross={potentialGross}
                 potentialProfit={potentialProfit}
                 selectedCards={selectedCards}
                 stake={stake}
                 onChangeStake={setStake}
-                onNextMatch={() => selectAdjacentMatch(1)}
                 onOpenCardPicker={() => setCardPickerOpen(true)}
                 onPlacePrediction={placePrediction}
-                onPreviousMatch={() => selectAdjacentMatch(-1)}
                 onSettle={settleMatch}
               />
             ) : (
@@ -681,14 +703,6 @@ export function App() {
               </div>
             )}
 
-            {matches.length > 0 && (
-              <MatchResultsStrip
-                matches={matches}
-                selectedMatchId={selectedMatch?.id ?? ""}
-                onSelect={selectMatch}
-              />
-            )}
-
             {selectedMatch && (
               <div className="mobile-lineup-wrapper">
                 <LineupPreview match={selectedMatch} />
@@ -697,7 +711,13 @@ export function App() {
 
             <section className="market-grid-section">
               <SectionTitle
-                eyebrow={isLoading ? "Loading fixtures" : `${matches.length} fixtures`}
+                action={
+                  <button className="section-action-button" type="button" onClick={() => setMarketComposerOpen(true)}>
+                    <Plus size={15} />
+                    Create market
+                  </button>
+                }
+                eyebrow={isLoading ? "Loading fixtures" : `${marketItems.length} admin and user markets`}
                 title="More World Cup predictions"
               />
               {marketItems.length ? (
@@ -708,6 +728,7 @@ export function App() {
                       isSelected={item.match.id === selectedMatch?.id && item.market.id === selectedMarket?.id}
                       item={item}
                       key={`${item.match.id}-${item.market.id}`}
+                      onPlacePrediction={placePrediction}
                       onSelect={() => selectMarket(item.match.id, item.market.id)}
                     />
                   ))}
@@ -723,11 +744,19 @@ export function App() {
           </section>
 
           <aside className="insight-column" aria-label="Match insights">
+            {matches.length > 0 && (
+              <MatchResultsStrip
+                matches={matches}
+                selectedMatchId={selectedMatch?.id ?? ""}
+                onSelect={selectMatch}
+              />
+            )}
             {selectedMatch && (
               <div className="desktop-lineup-wrapper">
                 <LineupPreview match={selectedMatch} />
               </div>
             )}
+            {selectedMatch && <TransferWatchPanel match={selectedMatch} />}
             <MarketInsightPanel
               emptyLabel="Activity appears after the first platform position."
               items={trendingItems}
@@ -776,6 +805,15 @@ export function App() {
         />
       )}
 
+      {marketComposerOpen && (
+        <MarketComposerModal
+          matches={matches}
+          selectedMatchId={selectedMatch?.id ?? featuredMatch?.id ?? ""}
+          onClose={() => setMarketComposerOpen(false)}
+          onCreate={createMarket}
+        />
+      )}
+
       {authMode && (
         <AuthModal
           mode={authMode}
@@ -802,35 +840,27 @@ function FeaturedMarket({
   activity,
   market,
   match,
-  matchIndex,
   maxBonus,
-  matchTotal,
   potentialGross,
   potentialProfit,
   selectedCards,
   stake,
   onChangeStake,
-  onNextMatch,
   onOpenCardPicker,
   onPlacePrediction,
-  onPreviousMatch,
   onSettle,
 }: {
   activity: MarketActivity;
   market: MarketDefinition;
   match: MatchSnapshot;
-  matchIndex: number;
   maxBonus: number;
-  matchTotal: number;
   potentialGross: number;
   potentialProfit: number;
   selectedCards: CardDefinition[];
   stake: number;
   onChangeStake: (value: number) => void;
-  onNextMatch: () => void;
   onOpenCardPicker: () => void;
-  onPlacePrediction: (targetMarketId?: string, outcome?: "yes" | "no") => void;
-  onPreviousMatch: () => void;
+  onPlacePrediction: (targetMatch?: MatchSnapshot, targetMarketId?: string, outcome?: "yes" | "no") => void;
   onSettle: () => void;
 }) {
   const [yesPercent, noPercent] = currentOutcomePercents(activity, market.oddsBps);
@@ -853,17 +883,7 @@ function FeaturedMarket({
           </div>
         </div>
         <div className="icon-actions">
-          <div className="match-switcher" aria-label="Fixture navigation">
-            <button aria-label="Previous match" disabled={matchTotal < 2} type="button" onClick={onPreviousMatch}>
-              <ChevronLeft size={18} />
-            </button>
-            <span>
-              Match {matchIndex + 1} of {Math.max(matchTotal, 1)}
-            </span>
-            <button aria-label="Next match" disabled={matchTotal < 2} type="button" onClick={onNextMatch}>
-              <ChevronRight size={18} />
-            </button>
-          </div>
+          <span className="creator-pill">Admin market</span>
           <button aria-label="Copy market link" type="button">
             <Link2 size={18} />
           </button>
@@ -884,19 +904,19 @@ function FeaturedMarket({
 
           <div className="outcome-stack">
             <OutcomeRow
-              actionLabel={formatPercentCents(yesPercent)}
+              actionLabel={`Buy ${formatPercentCents(yesPercent)}`}
               label={primaryOutcome.label}
               logoUrl={primaryOutcome.logoUrl}
               teamCode={primaryOutcome.code}
-              onAction={() => onPlacePrediction(market.id, "yes")}
+              onAction={() => onPlacePrediction(match, market.id, "yes")}
             />
             <OutcomeRow
-              actionLabel={formatPercentCents(noPercent)}
+              actionLabel={`Buy ${formatPercentCents(noPercent)}`}
               label={secondaryOutcome.label}
               logoUrl={secondaryOutcome.logoUrl}
               teamCode={secondaryOutcome.code}
               tone="secondary"
-              onAction={() => onPlacePrediction(secondaryMarketId ?? market.id, secondaryMarketId ? "yes" : "no")}
+              onAction={() => onPlacePrediction(match, secondaryMarketId ?? market.id, secondaryMarketId ? "yes" : "no")}
             />
           </div>
 
@@ -1122,26 +1142,63 @@ function MatchResultsStrip({
   );
 }
 
+function MarketGlyph({ market, match }: { market: MarketDefinition; match: MatchSnapshot }) {
+  if (market.kind === "future") {
+    return (
+      <span className="market-card-icon future">
+        <Trophy size={20} />
+      </span>
+    );
+  }
+  if (market.kind === "stats" || market.kind === "rating") {
+    return (
+      <span className="market-card-icon stats">
+        <BarChart3 size={20} />
+      </span>
+    );
+  }
+  return (
+    <span className="market-card-icon teams">
+      <TeamAvatar code={match.homeCode} logoUrl={match.homeLogoUrl} />
+      <TeamAvatar code={match.awayCode} logoUrl={match.awayLogoUrl} />
+    </span>
+  );
+}
+
 function MarketCard({
   activity,
   isSelected,
   item,
+  onPlacePrediction,
   onSelect,
 }: {
   activity: MarketActivity;
   isSelected: boolean;
   item: MarketItem;
+  onPlacePrediction: (targetMatch?: MatchSnapshot, targetMarketId?: string, outcome?: "yes" | "no") => void;
   onSelect: () => void;
 }) {
   const [yesPercent, noPercent] = currentOutcomePercents(activity, item.market.oddsBps);
   const [primaryOutcome, secondaryOutcome] = outcomeRows(item.market, item.match);
+  const secondaryMarketId = oppositeResultMarketId(item.market.id);
 
   return (
-    <button className={`prediction-card ${isSelected ? "is-selected" : ""}`} type="button" onClick={onSelect}>
+    <article
+      className={`prediction-card ${isSelected ? "is-selected" : ""}`}
+      role="button"
+      tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelect();
+        }
+      }}
+    >
       <div className="card-title-row">
-        <TeamAvatar code={item.match.homeCode} logoUrl={item.match.homeLogoUrl} />
+        <MarketGlyph market={item.market} match={item.match} />
         <div>
-          <span>{item.match.competition ?? "World Cup"}</span>
+          <span>{creatorLabel(item.market)}</span>
           <strong>{marketQuestion(item.market, item.match)}</strong>
         </div>
       </div>
@@ -1149,12 +1206,30 @@ function MarketCard({
         <div>
           <span>{primaryOutcome.label}</span>
           <strong>{Math.round(yesPercent)}%</strong>
-          <em>{formatPercentCents(yesPercent)}</em>
+          <button
+            className="mini-buy-button yes"
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onPlacePrediction(item.match, item.market.id, "yes");
+            }}
+          >
+            {formatPercentCents(yesPercent)}
+          </button>
         </div>
         <div>
           <span>{secondaryOutcome.label}</span>
           <strong>{Math.round(noPercent)}%</strong>
-          <em>{formatPercentCents(noPercent)}</em>
+          <button
+            className="mini-buy-button no"
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onPlacePrediction(item.match, secondaryMarketId ?? item.market.id, secondaryMarketId ? "yes" : "no");
+            }}
+          >
+            {formatPercentCents(noPercent)}
+          </button>
         </div>
       </div>
       <MarketCardOdds odds={item.match.odds ?? []} />
@@ -1165,22 +1240,22 @@ function MarketCard({
           <Bookmark size={16} />
         </div>
       </div>
-    </button>
+    </article>
   );
 }
 
 function MarketCardOdds({ odds }: { odds: MatchSnapshot["odds"] }) {
   const firstOdd = resultOdds(odds ?? [])[0];
   if (!firstOdd) {
-    return <div className="mini-odds is-empty">StablePrice odds pending</div>;
+    return null;
   }
   return (
     <div className="mini-odds">
-      <span>TXODDS</span>
+      <span>TXODDS 1X2</span>
       <strong>
         {firstOdd.shortLabel ? `${firstOdd.shortLabel} ${firstOdd.selection}` : firstOdd.selection}
       </strong>
-      <em>{formatOdd(firstOdd)}</em>
+      <em>{formatResultOdd(firstOdd)}</em>
     </div>
   );
 }
@@ -1189,21 +1264,16 @@ function LineupPreview({ match }: { match: MatchSnapshot }) {
   const homeLineup = match.lineups?.[match.home];
   const awayLineup = match.lineups?.[match.away];
   const hasLineups = Boolean(homeLineup?.starters.length || awayLineup?.starters.length);
-  const title = match.status === "SCHEDULED" ? "Expected lineups" : "Confirmed lineups";
+  const title = match.status === "SCHEDULED" ? "expected lineups" : "confirmed lineups";
   const homeStats = teamStats(match, match.home);
   const awayStats = teamStats(match, match.away);
   const showStats = match.status !== "SCHEDULED";
 
   return (
     <section className="lineup-panel">
-      <div className="lineup-top">
-        <TeamCompact code={match.homeCode} logoUrl={match.homeLogoUrl} name={match.home} />
-        <TeamCompact alignRight code={match.awayCode} logoUrl={match.awayLogoUrl} name={match.away} />
-      </div>
       <MatchSummaryCard match={match} />
       <div className="lineup-subhead">
         <span>{title}</span>
-        <strong>{formatStart(match.startTime)}</strong>
       </div>
       <div className={`pitch-surface ${hasLineups ? "has-lineups" : "is-empty"}`}>
         {hasLineups ? (
@@ -1235,6 +1305,7 @@ function MatchSummaryCard({ match }: { match: MatchSnapshot }) {
   const homeGoals = match.events.filter((event) => event.type === "goal" && sameTeam(event.team, match.home));
   const awayGoals = match.events.filter((event) => event.type === "goal" && sameTeam(event.team, match.away));
   const venue = [match.venueName, match.venueCity].filter(Boolean).join(", ");
+  const hasGoals = homeGoals.length > 0 || awayGoals.length > 0;
   return (
     <section className="match-summary-card">
       <div className="match-summary-score">
@@ -1244,18 +1315,20 @@ function MatchSummaryCard({ match }: { match: MatchSnapshot }) {
         </div>
         <div className="summary-scoreline">
           <span>{matchStatusLabel(match)}</span>
-          <strong>{match.status === "SCHEDULED" ? formatFixtureTime(match.startTime) : `${homeScore} - ${awayScore}`}</strong>
-          <em>{match.status === "SCHEDULED" ? "Kickoff" : match.minute}</em>
+          <strong>{match.status === "SCHEDULED" ? "vs" : `${homeScore} - ${awayScore}`}</strong>
+          {match.status !== "SCHEDULED" && <em>{match.minute}</em>}
         </div>
         <div className="summary-team away">
           <TeamAvatar code={match.awayCode} logoUrl={match.awayLogoUrl} />
           <strong>{match.away}</strong>
         </div>
       </div>
-      <div className="summary-goals">
-        <GoalColumn events={homeGoals} />
-        <GoalColumn events={awayGoals} />
-      </div>
+      {hasGoals && (
+        <div className="summary-goals">
+          <GoalColumn events={homeGoals} />
+          <GoalColumn events={awayGoals} />
+        </div>
+      )}
       <div className="summary-meta-row">
         <span>
           <Clock3 size={13} />
@@ -1271,14 +1344,13 @@ function MatchSummaryCard({ match }: { match: MatchSnapshot }) {
             {venue}
           </span>
         )}
-        <span>Data: {match.detailSource ? "TXLine + API-FOOTBALL" : match.source.toUpperCase()}</span>
       </div>
     </section>
   );
 }
 
 function GoalColumn({ events }: { events: MatchEvent[] }) {
-  if (!events.length) return <div className="goal-column is-empty">No goals listed</div>;
+  if (!events.length) return <div className="goal-column" />;
   return (
     <div className="goal-column">
       {events.slice(0, 5).map((event, index) => (
@@ -1287,6 +1359,30 @@ function GoalColumn({ events }: { events: MatchEvent[] }) {
         </span>
       ))}
     </div>
+  );
+}
+
+function TransferWatchPanel({ match }: { match: MatchSnapshot }) {
+  const transfers = match.transfers ?? [];
+  if (!transfers.length) return null;
+  return (
+    <section className="insight-panel transfer-panel">
+      <div className="panel-heading">
+        <h2>Transfer watch</h2>
+        <History size={20} />
+      </div>
+      <div className="transfer-list">
+        {transfers.slice(0, 5).map((transfer, index) => (
+          <div className="transfer-row" key={`${transfer.playerName}-${transfer.date}-${index}`}>
+            <strong>{transfer.playerName}</strong>
+            <span>
+              {[transfer.fromTeam, transfer.toTeam].filter(Boolean).join(" -> ") || transfer.type || "Transfer"}
+            </span>
+            {transfer.date && <em>{formatTransferDate(transfer.date)}</em>}
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -1679,6 +1775,77 @@ function AuthModal({
   );
 }
 
+function MarketComposerModal({
+  matches,
+  selectedMatchId,
+  onClose,
+  onCreate,
+}: {
+  matches: MatchSnapshot[];
+  selectedMatchId: string;
+  onClose: () => void;
+  onCreate: (question: string, matchId: string) => void;
+}) {
+  const [matchId, setMatchId] = useState(selectedMatchId);
+  const [question, setQuestion] = useState("");
+  const selected = matches.find((match) => match.id === matchId) ?? matches[0];
+  const canCreate = question.trim().length >= 12 && Boolean(matchId);
+
+  return (
+    <div className="card-modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        aria-modal="true"
+        className="auth-modal market-composer-modal"
+        role="dialog"
+        aria-labelledby="market-composer-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="card-modal-header">
+          <div>
+            <span>Create market</span>
+            <h2 id="market-composer-title">Open a World Cup prediction</h2>
+          </div>
+          <button aria-label="Close market composer" type="button" onClick={onClose}>
+            <X size={20} />
+          </button>
+        </div>
+        <div className="profile-grid">
+          <label className="field wide">
+            <span>Fixture</span>
+            <select value={matchId} onChange={(event) => setMatchId(event.target.value)}>
+              {matches.map((match) => (
+                <option key={match.id} value={match.id}>
+                  {match.home} vs {match.away}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field wide">
+            <span>Question</span>
+            <textarea
+              placeholder={selected ? `${selected.home} vs ${selected.away}: will the match have 4+ goals?` : "Will this market resolve as yes?"}
+              value={question}
+              onChange={(event) => setQuestion(event.target.value)}
+            />
+          </label>
+        </div>
+        <div className="composer-footer">
+          <p>User-created markets start at 50/50 and require admin settlement until an oracle rule is attached.</p>
+          <button
+            className="signup-button"
+            disabled={!canCreate}
+            type="button"
+            onClick={() => onCreate(question.trim(), matchId)}
+          >
+            <Plus size={17} />
+            Create market
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function CreditDesk({
   defaultTargetUserId,
   ledger,
@@ -1790,11 +1957,14 @@ function UsdcIcon() {
   );
 }
 
-function SectionTitle({ eyebrow, title }: { eyebrow: string; title: string }) {
+function SectionTitle({ action, eyebrow, title }: { action?: ReactNode; eyebrow: string; title: string }) {
   return (
     <div className="section-title">
-      <span>{eyebrow}</span>
-      <h2>{title}</h2>
+      <div>
+        <span>{eyebrow}</span>
+        <h2>{title}</h2>
+      </div>
+      {action}
     </div>
   );
 }
@@ -2320,7 +2490,63 @@ function rankVolumeMarkets(items: MarketItem[], state: AppState): MarketItem[] {
   return ranked;
 }
 
+function buildLaunchMarketItems(matches: MatchSnapshot[], markets: MarketDefinition[], featuredMatchId?: string): MarketItem[] {
+  const finalMatch = pickLaunchMatch(matches);
+  const thirdPlaceMatch = matches.find(isWorldCupThirdPlace);
+  const byId = new Map(markets.map((market) => [market.id, market]));
+
+  const userCreated = markets
+    .filter((market) => market.creatorRole === "user")
+    .map((market) => {
+      const match = matchForMarket(market, matches, finalMatch);
+      return match ? { match, market } : null;
+    })
+    .filter((item): item is MarketItem => Boolean(item));
+
+  const adminPlan: Array<{ match?: MatchSnapshot; marketId: string }> = [
+    { match: thirdPlaceMatch, marketId: "home-win" },
+    { match: finalMatch, marketId: "both-teams-score" },
+    { match: finalMatch, marketId: "over-2-5-goals" },
+    { match: finalMatch, marketId: "penalty-shootout" },
+    { match: finalMatch, marketId: "extra-time" },
+    { match: finalMatch, marketId: "home-possession-60" },
+    { match: finalMatch, marketId: "world-cup-top-scorer" },
+    { match: finalMatch, marketId: "world-cup-golden-ball" },
+    { match: finalMatch, marketId: "world-cup-most-team-goals" },
+    { match: finalMatch, marketId: "hat-trick-market" },
+  ];
+
+  const adminItems = adminPlan
+    .map(({ match, marketId }) => {
+      const market = byId.get(marketId);
+      return match && market && marketAppliesToMatch(market, match) ? { match, market } : null;
+    })
+    .filter((item): item is MarketItem => Boolean(item));
+
+  const deduped = new Map<string, MarketItem>();
+  for (const item of [...userCreated, ...adminItems]) {
+    const key = `${item.match.id}:${item.market.id}`;
+    if (featuredMatchId && item.match.id === featuredMatchId && item.market.id === "home-win") continue;
+    if (!deduped.has(key)) deduped.set(key, item);
+  }
+  return [...deduped.values()].slice(0, 9);
+}
+
+function matchForMarket(
+  market: MarketDefinition,
+  matches: MatchSnapshot[],
+  fallback?: MatchSnapshot,
+): MatchSnapshot | undefined {
+  if (market.fixtureId) {
+    return matches.find((match) => match.id === market.fixtureId);
+  }
+  if (market.scope === "third-place") return matches.find(isWorldCupThirdPlace) ?? fallback;
+  if (market.scope === "final" || market.scope === "world-cup") return pickLaunchMatch(matches) ?? fallback;
+  return fallback ?? matches[0];
+}
+
 function marketAppliesToMatch(market: MarketDefinition, match: MatchSnapshot): boolean {
+  if (market.fixtureId) return market.fixtureId === match.id;
   if (!market.scope || market.scope === "all") return true;
   if (market.scope === "world-cup") return isWorldCupFinal(match);
   if (market.scope === "final") return isWorldCupFinal(match);
@@ -2598,6 +2824,11 @@ function shortOddsLabel(odd: NonNullable<MatchSnapshot["odds"]>[number]): string
   return "";
 }
 
+function creatorLabel(market: MarketDefinition): string {
+  const creator = market.createdBy || "Prediction Arena";
+  return market.creatorRole === "user" ? `User market by ${creator}` : `Admin market by ${creator}`;
+}
+
 function numericStat(value: string): number {
   const parsed = Number(value.replace(/[^\d.]/g, ""));
   return Number.isFinite(parsed) ? parsed : 0;
@@ -2622,13 +2853,24 @@ function flagUrlForCode(code: string): string {
 }
 
 function marketQuestion(market: MarketDefinition, match: MatchSnapshot): string {
-  if (market.question) return market.question;
   switch (market.id) {
     case "home-win":
     case "away-win":
       return worldCupResultQuestion(match) ?? `Who will win, ${match.home} or ${match.away}?`;
     case "draw-after-90":
       return `Will ${match.home} vs ${match.away} be tied after regulation?`;
+    case "both-teams-score":
+      return `${match.home} vs ${match.away}: will both teams score?`;
+    case "over-2-5-goals":
+      return `${match.home} vs ${match.away}: will the match have 3+ goals?`;
+    case "over-3-5-goals":
+      return `${match.home} vs ${match.away}: will the match have 4+ goals?`;
+    case "under-2-5-goals":
+      return `${match.home} vs ${match.away}: will the match finish with under 3 goals?`;
+    case "penalty-shootout":
+      return `${match.home} vs ${match.away}: will the match go to penalties?`;
+    case "extra-time":
+      return `${match.home} vs ${match.away}: will the match go to extra time?`;
     case "home-goal":
       return `Will ${match.home} score?`;
     case "away-goal":
@@ -2652,15 +2894,15 @@ function marketQuestion(market: MarketDefinition, match: MatchSnapshot): string 
     case "away-most-corners":
       return `Will ${match.away} take more corners?`;
     case "hat-trick-market":
-      return `Will any player score a hat-trick?`;
+      return `${match.home} vs ${match.away}: will any player score a hat-trick?`;
     case "poker-trick-market":
-      return `Will any player score 4 goals?`;
+      return `${match.home} vs ${match.away}: will any player score 4 goals?`;
     case "mom-home-team":
       return `Will the match MVP come from ${match.home}?`;
     case "mom-away-team":
       return `Will the match MVP come from ${match.away}?`;
     default:
-      return market.label;
+      return market.question ?? market.label;
   }
 }
 
@@ -2697,6 +2939,16 @@ function formatFixtureDate(value?: string | number): string {
   if (!value) return "Date TBA";
   const date = typeof value === "number" ? new Date(value) : new Date(value);
   if (Number.isNaN(date.getTime())) return "Date TBA";
+  return date.toLocaleDateString("en-US", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function formatTransferDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleDateString("en-US", {
     day: "2-digit",
     month: "short",

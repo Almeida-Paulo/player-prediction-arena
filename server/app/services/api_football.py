@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
@@ -31,10 +32,13 @@ async def hydrate_api_football_details(
             continue
         candidate_id = ((candidate.get("fixture") or {}) if isinstance(candidate.get("fixture"), dict) else {}).get("id")
         if candidate_id:
-            detailed_candidate = await fetch_fixture_by_id(base, headers, str(candidate_id), client)
+            detailed_candidate = await fetch_fixture_bundle(base, headers, str(candidate_id), client)
             if detailed_candidate:
                 candidate = detailed_candidate
         apply_fixture_details(match, candidate)
+        transfers = await fetch_match_transfers(base, headers, candidate, client)
+        if transfers:
+            match["transfers"] = transfers
 
 
 async def fetch_fixtures_for_date(
@@ -78,6 +82,129 @@ async def fetch_fixture_by_id(
     items = payload.get("response", []) if isinstance(payload, dict) else []
     first = items[0] if isinstance(items, list) and items else None
     return first if isinstance(first, dict) else None
+
+
+async def fetch_fixture_bundle(
+    base: str,
+    headers: dict[str, str],
+    fixture_id: str,
+    client: httpx.AsyncClient,
+) -> dict[str, Any] | None:
+    fixture = await fetch_fixture_by_id(base, headers, fixture_id, client)
+    if not fixture:
+        return None
+
+    lineups, statistics, events, players = await asyncio.gather(
+        fetch_fixture_collection(base, headers, "fixtures/lineups", {"fixture": fixture_id}, client),
+        fetch_fixture_collection(base, headers, "fixtures/statistics", {"fixture": fixture_id}, client),
+        fetch_fixture_collection(base, headers, "fixtures/events", {"fixture": fixture_id}, client),
+        fetch_fixture_collection(base, headers, "fixtures/players", {"fixture": fixture_id}, client),
+    )
+    if lineups:
+        fixture["lineups"] = lineups
+    if statistics:
+        fixture["statistics"] = statistics
+    if events:
+        fixture["events"] = events
+    if players:
+        fixture["players"] = players
+    return fixture
+
+
+async def fetch_fixture_collection(
+    base: str,
+    headers: dict[str, str],
+    endpoint: str,
+    params: dict[str, str],
+    client: httpx.AsyncClient,
+) -> list[dict[str, Any]]:
+    try:
+        response = await client.get(f"{base}/{endpoint}", headers=headers, params=params, timeout=8)
+        if response.status_code >= 400:
+            return []
+        payload = response.json()
+    except (httpx.HTTPError, ValueError):
+        return []
+
+    items = payload.get("response", []) if isinstance(payload, dict) else []
+    return [item for item in items if isinstance(item, dict)] if isinstance(items, list) else []
+
+
+async def fetch_match_transfers(
+    base: str,
+    headers: dict[str, str],
+    fixture: dict[str, Any],
+    client: httpx.AsyncClient,
+) -> list[dict[str, Any]]:
+    teams = fixture.get("teams", {}) if isinstance(fixture.get("teams"), dict) else {}
+    team_ids = [
+        ((teams.get(side) or {}) if isinstance(teams.get(side), dict) else {}).get("id")
+        for side in ["home", "away"]
+    ]
+    team_ids = [str(team_id) for team_id in team_ids if team_id]
+    if not team_ids:
+        return []
+
+    batches = await asyncio.gather(
+        *(fetch_transfers_for_team(base, headers, team_id, client) for team_id in team_ids),
+    )
+    seen: set[str] = set()
+    output: list[dict[str, Any]] = []
+    for batch in batches:
+        for item in batch:
+            key = "|".join(
+                str(item.get(part) or "")
+                for part in ["playerName", "date", "type", "fromTeam", "toTeam"]
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            output.append(item)
+    return sorted(output, key=lambda item: str(item.get("date") or ""), reverse=True)[:6]
+
+
+async def fetch_transfers_for_team(
+    base: str,
+    headers: dict[str, str],
+    team_id: str,
+    client: httpx.AsyncClient,
+) -> list[dict[str, Any]]:
+    try:
+        response = await client.get(f"{base}/transfers", headers=headers, params={"team": team_id}, timeout=8)
+        if response.status_code >= 400:
+            return []
+        payload = response.json()
+    except (httpx.HTTPError, ValueError):
+        return []
+
+    items = payload.get("response", []) if isinstance(payload, dict) else []
+    output: list[dict[str, Any]] = []
+    if not isinstance(items, list):
+        return output
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        player = item.get("player") if isinstance(item.get("player"), dict) else {}
+        for transfer in item.get("transfers", []):
+            if not isinstance(transfer, dict):
+                continue
+            teams = transfer.get("teams") if isinstance(transfer.get("teams"), dict) else {}
+            out_team = teams.get("out") if isinstance(teams.get("out"), dict) else {}
+            in_team = teams.get("in") if isinstance(teams.get("in"), dict) else {}
+            player_name = player.get("name")
+            if not player_name:
+                continue
+            output.append(
+                {
+                    "playerName": player_name,
+                    "date": transfer.get("date"),
+                    "type": transfer.get("type") or "Transfer",
+                    "fromTeam": out_team.get("name") or "",
+                    "toTeam": in_team.get("name") or "",
+                    "source": "api-football",
+                }
+            )
+    return output
 
 
 def find_matching_fixture(fixtures: list[dict[str, Any]], match: dict[str, Any]) -> dict[str, Any] | None:
@@ -173,6 +300,7 @@ def map_lineup_player(row: dict[str, Any], side: str) -> dict[str, Any]:
         "name": player.get("name") or "Unknown player",
         "number": safe_int_or_none(player.get("number")),
         "position": player.get("pos"),
+        "photoUrl": player.get("photo"),
     }
     grid = str(player.get("grid") or "")
     coords = lineup_grid_to_xy(grid, side)

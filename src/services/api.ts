@@ -2,12 +2,12 @@ import { cards } from "../../shared/cards";
 import { skillBadges } from "../../shared/badges";
 import { markets } from "../../shared/demo-data";
 import { settlePosition } from "../../shared/settlement";
-import type { CardDefinition, MatchSnapshot, PlatformUserState, PositionInput, SettledPosition } from "../../shared/types";
+import type { CardDefinition, MarketDefinition, MatchSnapshot, PlatformUserState, PositionInput, SettledPosition } from "../../shared/types";
 
 export interface CatalogResponse {
   cards: CardDefinition[];
   badges: typeof skillBadges;
-  markets: typeof markets;
+  markets: MarketDefinition[];
 }
 
 export async function getCatalog(): Promise<CatalogResponse> {
@@ -109,6 +109,21 @@ export async function createPlatformPosition(userId: string, position: PositionI
   });
   if (!response.ok) throw new Error(`Position HTTP ${response.status}`);
   return (await response.json()) as PlatformUserState;
+}
+
+export async function createPlatformMarket(payload: {
+  question: string;
+  label?: string;
+  matchId?: string;
+}): Promise<{ market: MarketDefinition }> {
+  const response = await fetch("/api/markets", {
+    body: JSON.stringify(payload),
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  if (!response.ok) throw new Error(`Create market HTTP ${response.status}`);
+  return (await response.json()) as { market: MarketDefinition };
 }
 
 export async function settlePlatformMatch(userId: string, matchId: string): Promise<PlatformUserState> {

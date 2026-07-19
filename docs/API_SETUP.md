@@ -137,6 +137,6 @@ The database stores `email`, `auth_provider`, `auth_subject`, `wallet_address`, 
 ## Real vs platform-generated data
 
 - Real match fixtures, scores, status, and odds: TXLine/TXODDS.
-- Real lineups, logos, statistics, and ratings: API-FOOTBALL when configured.
-- Platform data: users, auth method, email, internal balances shown as USDC in Rewards, Arena Points, positions, card inventory, ledger, volume, leaderboard, and prediction history.
+- Real lineups, logos, statistics, events, player ratings, and available transfers: API-FOOTBALL when configured.
+- Platform data: admin-created seed markets, user-created manual markets, users, auth method, email, internal balances shown as USDC in Rewards, Arena Points, positions, card inventory, ledger, volume, leaderboard, and prediction history.
 - Synthetic seed data: only the initial liquidity/activity used to make the hackathon market graph readable before enough real users trade.

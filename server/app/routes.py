@@ -71,6 +71,12 @@ class AdminPointsPayload(BaseModel):
     note: str = Field(default="Event points", max_length=160)
 
 
+class MarketCreatePayload(BaseModel):
+    question: str = Field(min_length=12, max_length=180)
+    label: str = Field(default="", max_length=80)
+    matchId: str = Field(default="", max_length=80)
+
+
 @router.get("/health")
 async def health() -> dict[str, Any]:
     settings = get_settings()
@@ -79,10 +85,17 @@ async def health() -> dict[str, Any]:
 
 @router.get("/catalog")
 async def catalog() -> dict[str, Any]:
+    markets = admin_seed_markets()
+    try:
+        with get_pool().connection() as conn:
+            ensure_platform_tables(conn)
+            markets = [*markets, *load_platform_markets(conn)]
+    except Exception:
+        pass
     return {
         "cards": public_cards(),
         "badges": BADGES,
-        "markets": MARKETS,
+        "markets": markets,
         "dataSources": [
             {"id": "txline", "label": "TXLine", "role": "required World Cup fixture, score and odds oracle"},
             {"id": "api-football", "label": "API-FOOTBALL", "role": "optional lineups, logos, richer stats and ratings"},
@@ -240,6 +253,43 @@ async def auth_logout(request: Request) -> JSONResponse:
 @router.post("/users")
 async def create_user() -> dict[str, Any]:
     raise HTTPException(status_code=410, detail="use_auth_google_or_solana")
+
+
+@router.post("/markets")
+async def create_market(payload: MarketCreatePayload, request: Request) -> dict[str, Any]:
+    question = payload.question.strip()
+    if not question.endswith("?"):
+        question = f"{question}?"
+    label = payload.label.strip() or question[:72]
+    with get_pool().connection() as conn:
+        actor = require_user_session(conn, request)
+        market_id = f"market-{uuid4().hex[:12]}"
+        conn.execute(
+            """
+            INSERT INTO platform_markets (
+              id, creator_user_id, creator_role, match_id, label, question,
+              kind, odds_bps, settlement_key, context_team, data_source, status
+            ) VALUES (%s, %s, %s, %s, %s, %s, 'future', 20000, 'manual', 'none', 'manual', 'open')
+            """,
+            (
+                market_id,
+                actor["id"],
+                "admin" if actor.get("role") == "admin" else "user",
+                payload.matchId.strip(),
+                label,
+                question,
+            ),
+        )
+        row = conn.execute(
+            """
+            SELECT platform_markets.*, users.display_name
+            FROM platform_markets
+            JOIN users ON users.id = platform_markets.creator_user_id
+            WHERE platform_markets.id = %s
+            """,
+            (market_id,),
+        ).fetchone()
+        return {"market": row_to_platform_market(row)}
 
 
 @router.get("/users/{user_id}/state")
@@ -569,6 +619,27 @@ def ensure_platform_tables(conn: Any) -> None:
         """
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_point_entries_user_time ON point_entries(user_id, created_at DESC)")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS platform_markets (
+          id TEXT PRIMARY KEY,
+          creator_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          creator_role TEXT NOT NULL DEFAULT 'user',
+          match_id TEXT NOT NULL DEFAULT '',
+          label TEXT NOT NULL,
+          question TEXT NOT NULL,
+          kind TEXT NOT NULL DEFAULT 'future',
+          odds_bps INTEGER NOT NULL DEFAULT 20000,
+          settlement_key TEXT NOT NULL DEFAULT 'manual',
+          context_team TEXT NOT NULL DEFAULT 'none',
+          data_source TEXT NOT NULL DEFAULT 'manual',
+          status TEXT NOT NULL DEFAULT 'open',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_platform_markets_match ON platform_markets(match_id)")
     _platform_tables_ready = True
 
 
@@ -721,6 +792,48 @@ def match_bet_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     for row in rows:
         counts[row["match_id"]] = counts.get(row["match_id"], 0) + 1
     return counts
+
+
+def admin_seed_markets() -> list[dict[str, Any]]:
+    return [
+        {
+            **market,
+            "createdBy": market.get("createdBy") or "Prediction Arena",
+            "creatorRole": market.get("creatorRole") or "admin",
+        }
+        for market in MARKETS
+    ]
+
+
+def load_platform_markets(conn: Any) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT platform_markets.*, users.display_name
+        FROM platform_markets
+        JOIN users ON users.id = platform_markets.creator_user_id
+        WHERE platform_markets.status = 'open'
+        ORDER BY platform_markets.created_at DESC
+        LIMIT 50
+        """
+    ).fetchall()
+    return [row_to_platform_market(row) for row in rows]
+
+
+def row_to_platform_market(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "label": row["label"],
+        "kind": row["kind"],
+        "oddsBps": row["odds_bps"],
+        "settlementKey": row["settlement_key"],
+        "contextTeam": row["context_team"],
+        "dataSource": row["data_source"],
+        "question": row["question"],
+        "createdBy": row.get("display_name") or "Platform user",
+        "creatorRole": row["creator_role"],
+        "fixtureId": row.get("match_id") or "",
+        "marketNote": "User-created market. Settlement requires admin review until an oracle feed is connected.",
+    }
 
 
 def validate_card_locks(conn: Any, user_id: str, match_id: str, card_ids: list[str]) -> None:
